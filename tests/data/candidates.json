@@ -1,0 +1,17 @@
+{
+  "_comment": "Offline fixture for the local_fixture provider. NOT a real search result. Relative image_url paths resolve against this file's directory.",
+  "candidates": [
+    {
+      "page_url": "https://example.org/blog/an-unrelated-post",
+      "image_url": "candidate_other.png",
+      "title": "An unrelated article (should be rejected)",
+      "source": "example.org"
+    },
+    {
+      "page_url": "https://x.com/demo_user/status/1799887766554433221",
+      "image_url": "candidate_match.png",
+      "title": "Synthetic post carrying a re-encode of the query image",
+      "source": "x.com"
+    }
+  ]
+}
