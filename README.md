@@ -1,4 +1,58 @@
-# Face ID + Blockchain Verification
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- ANIMATED HEADER BANNER                                                    -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+<div align="center">
+
+<a href="https://github.com/satyamshrivastav955-dotcom/face-blockchain-verification">
+  <img src="assets/banner.svg" alt="Face ID + Blockchain Verification" width="900"/>
+</a>
+
+<br/>
+<br/>
+
+<!-- ─── SHIELD BADGES ─────────────────────────────────────────────────── -->
+
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![OpenCV](https://img.shields.io/badge/OpenCV-YuNet%20%2B%20SFace-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white)](https://opencv.org)
+[![Solidity](https://img.shields.io/badge/Solidity-0.8.28-363636?style=for-the-badge&logo=solidity&logoColor=white)](https://soliditylang.org)
+[![Base Sepolia](https://img.shields.io/badge/Base-Sepolia-0052FF?style=for-the-badge&logo=coinbase&logoColor=white)](https://base.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge)](LICENSE)
+
+<br/>
+
+<!-- ─── SECONDARY BADGES ──────────────────────────────────────────────── -->
+
+![Google Lens](https://img.shields.io/badge/Search-Google%20Lens-EA4335?style=flat-square&logo=google&logoColor=white)
+![TinEye](https://img.shields.io/badge/Search-TinEye-0096DC?style=flat-square)
+![SHA-256](https://img.shields.io/badge/Hash-SHA--256-f59e0b?style=flat-square&logo=letsencrypt&logoColor=white)
+![RFC 8785](https://img.shields.io/badge/Canon-RFC%208785-8b5cf6?style=flat-square)
+![Web3.py](https://img.shields.io/badge/Web3.py-6.x-F16822?style=flat-square&logo=web3dotjs&logoColor=white)
+
+<br/>
+<br/>
+
+<!-- ─── ONE-LINE DESCRIPTION ──────────────────────────────────────────── -->
+
+<samp>
+
+**Detect a face → Reverse-image search → Independently verify → Anchor proof on-chain**
+
+</samp>
+
+<br/>
+
+---
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- PROJECT DESCRIPTION                                                       -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+<table>
+<tr>
+<td>
 
 Take a photo of a face, find the real social-media post that photo came from using a live
 reverse-image search, prove the match locally with a face recogniser, then anchor the result on a
@@ -9,28 +63,37 @@ re-detected, re-embedded and scored on this machine, and the scores for the reje
 kept in the record alongside the winner. That score table is the point: it is what distinguishes a
 real match from a hardcoded one, and it is what a reviewer should look at first.
 
-**What this tool claims, precisely:** *the image at `matched_image_url`, published at `matched_url`,
-contains the same face as the input image.* That is a statement about **image provenance**, not
-about the identity of a person. It says where a picture appears on the internet. It does not say who
-anybody is, and it should not be used as though it did. See [Limitations](#limitations).
+> **What this tool claims, precisely:** *the image at `matched_image_url`, published at `matched_url`,
+> contains the same face as the input image.* That is a statement about **image provenance**, not
+> about the identity of a person. It says where a picture appears on the internet. It does not say who
+> anybody is, and it should not be used as though it did. See [Limitations](#limitations).
+
+</td>
+</tr>
+</table>
 
 ---
 
-## Table of contents
+<!-- ─── TABLE OF CONTENTS ─────────────────────────────────────────────── -->
 
-- [Architecture](#architecture)
-- [Features](#features)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Environment variables](#environment-variables)
-- [How to run](#how-to-run)
-- [Smart contract](#smart-contract)
-- [Example output](#example-output)
-- [The record and the evidence bundle](#the-record-and-the-evidence-bundle)
-- [Tests](#tests)
-- [Limitations](#limitations)
-- [Security and privacy](#security-and-privacy)
-- [Demo video](#demo-video)
+<details open>
+<summary><h2>📑 Table of Contents</h2></summary>
+
+&nbsp;&nbsp;🏗️ [Architecture](#architecture)
+&nbsp;&nbsp;✨ [Features](#features)
+&nbsp;&nbsp;📋 [Requirements](#requirements)
+&nbsp;&nbsp;⚙️ [Installation](#installation)
+&nbsp;&nbsp;🔐 [Environment Variables](#environment-variables)
+&nbsp;&nbsp;🚀 [How to Run](#how-to-run)
+&nbsp;&nbsp;📜 [Smart Contract](#smart-contract)
+&nbsp;&nbsp;📊 [Example Output](#example-output)
+&nbsp;&nbsp;📦 [The Record & Evidence Bundle](#the-record-and-the-evidence-bundle)
+&nbsp;&nbsp;🧪 [Tests](#tests)
+&nbsp;&nbsp;⚠️ [Limitations](#limitations)
+&nbsp;&nbsp;🔒 [Security & Privacy](#security-and-privacy)
+&nbsp;&nbsp;🎬 [Demo Video](#demo-video)
+
+</details>
 
 ---
 
@@ -969,3 +1032,30 @@ MIT. See the SPDX header in `contracts/VerificationRegistry.sol`.
 The ONNX models are from the [OpenCV Zoo](https://github.com/opencv/opencv_zoo) under their own
 licences: YuNet is MIT, SFace is Apache 2.0. Neither is redistributed here — `scripts/fetch_models.py`
 downloads them from source.
+
+---
+
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+<!-- FOOTER                                                                     -->
+<!-- ═══════════════════════════════════════════════════════════════════════════ -->
+
+<div align="center">
+
+<br/>
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=6,11,20&height=100&section=footer" width="100%"/>
+
+<br/>
+
+**Built with 🔬 Computer Vision &nbsp;·&nbsp; ⛓️ Blockchain &nbsp;·&nbsp; 🛡️ Cryptographic Integrity**
+
+<br/>
+
+<sub>If this project helped you, consider giving it a ⭐</sub>
+
+<br/>
+<br/>
+
+<a href="#"><img src="https://img.shields.io/badge/⬆_Back_to_Top-0a0a1a?style=for-the-badge" alt="Back to Top"/></a>
+
+</div>

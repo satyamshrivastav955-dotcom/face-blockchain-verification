@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="300" viewBox="0 0 900 300">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a1a">
+        <animate attributeName="stop-color" values="#0a0a1a;#1a0a2e;#0a1a2e;#0a0a1a" dur="8s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="50%" style="stop-color:#1a0a2e">
+        <animate attributeName="stop-color" values="#1a0a2e;#0a1a2e;#2e0a1a;#1a0a2e" dur="8s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" style="stop-color:#0a1a2e">
+        <animate attributeName="stop-color" values="#0a1a2e;#0a0a1a;#1a0a2e;#0a1a2e" dur="8s" repeatCount="indefinite"/>
+      </stop>
+    </linearGradient>
+
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00d4ff">
+        <animate attributeName="stop-color" values="#00d4ff;#a855f7;#00d4ff" dur="4s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="50%" style="stop-color:#a855f7">
+        <animate attributeName="stop-color" values="#a855f7;#00d4ff;#a855f7" dur="4s" repeatCount="indefinite"/>
+      </stop>
+      <stop offset="100%" style="stop-color:#00d4ff">
+        <animate attributeName="stop-color" values="#00d4ff;#a855f7;#00d4ff" dur="4s" repeatCount="indefinite"/>
+      </stop>
+    </linearGradient>
+
+    <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:0"/>
+      <stop offset="50%" style="stop-color:#a855f7;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#00d4ff;stop-opacity:0"/>
+    </linearGradient>
+
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="900" height="300" fill="url(#bg)" rx="12"/>
+
+  <!-- Grid lines -->
+  <g opacity="0.06" stroke="#00d4ff" stroke-width="0.5">
+    <line x1="0" y1="60" x2="900" y2="60"/>
+    <line x1="0" y1="120" x2="900" y2="120"/>
+    <line x1="0" y1="180" x2="900" y2="180"/>
+    <line x1="0" y1="240" x2="900" y2="240"/>
+    <line x1="150" y1="0" x2="150" y2="300"/>
+    <line x1="300" y1="0" x2="300" y2="300"/>
+    <line x1="450" y1="0" x2="450" y2="300"/>
+    <line x1="600" y1="0" x2="600" y2="300"/>
+    <line x1="750" y1="0" x2="750" y2="300"/>
+  </g>
+
+  <!-- Floating particles -->
+  <circle cx="100" cy="50" r="2" fill="#00d4ff" opacity="0.6" filter="url(#softGlow)">
+    <animate attributeName="cy" values="50;250;50" dur="12s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.6;0.2;0.6" dur="12s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="200" cy="200" r="1.5" fill="#a855f7" opacity="0.5">
+    <animate attributeName="cy" values="200;30;200" dur="9s" repeatCount="indefinite"/>
+    <animate attributeName="cx" values="200;250;200" dur="9s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="700" cy="80" r="2.5" fill="#00d4ff" opacity="0.4" filter="url(#softGlow)">
+    <animate attributeName="cy" values="80;220;80" dur="11s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.4;0.8;0.4" dur="11s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="800" cy="250" r="1.5" fill="#a855f7" opacity="0.5">
+    <animate attributeName="cy" values="250;50;250" dur="10s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="350" cy="270" r="2" fill="#22d3ee" opacity="0.3">
+    <animate attributeName="cy" values="270;40;270" dur="14s" repeatCount="indefinite"/>
+    <animate attributeName="opacity" values="0.3;0.7;0.3" dur="14s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="550" cy="30" r="1.8" fill="#a855f7" opacity="0.5" filter="url(#softGlow)">
+    <animate attributeName="cy" values="30;260;30" dur="13s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="450" cy="150" r="1" fill="#00d4ff" opacity="0.6">
+    <animate attributeName="cy" values="150;20;150" dur="8s" repeatCount="indefinite"/>
+    <animate attributeName="cx" values="450;480;450" dur="8s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Face scan icon -->
+  <g transform="translate(100, 95)" opacity="0.9" filter="url(#glow)">
+    <!-- Face outline box corners -->
+    <path d="M0,0 L15,0 M0,0 L0,15" stroke="#00d4ff" stroke-width="2.5" fill="none">
+      <animate attributeName="stroke" values="#00d4ff;#a855f7;#00d4ff" dur="3s" repeatCount="indefinite"/>
+    </path>
+    <path d="M85,0 L70,0 M85,0 L85,15" stroke="#00d4ff" stroke-width="2.5" fill="none">
+      <animate attributeName="stroke" values="#00d4ff;#a855f7;#00d4ff" dur="3s" repeatCount="indefinite"/>
+    </path>
+    <path d="M0,110 L15,110 M0,110 L0,95" stroke="#00d4ff" stroke-width="2.5" fill="none">
+      <animate attributeName="stroke" values="#00d4ff;#a855f7;#00d4ff" dur="3s" repeatCount="indefinite"/>
+    </path>
+    <path d="M85,110 L70,110 M85,110 L85,95" stroke="#00d4ff" stroke-width="2.5" fill="none">
+      <animate attributeName="stroke" values="#00d4ff;#a855f7;#00d4ff" dur="3s" repeatCount="indefinite"/>
+    </path>
+    <!-- Simple face icon -->
+    <circle cx="42" cy="40" r="22" stroke="#a855f7" stroke-width="1.5" fill="none" opacity="0.7"/>
+    <circle cx="34" cy="36" r="2" fill="#a855f7" opacity="0.7"/>
+    <circle cx="50" cy="36" r="2" fill="#a855f7" opacity="0.7"/>
+    <path d="M34,48 Q42,56 50,48" stroke="#a855f7" stroke-width="1.5" fill="none" opacity="0.7"/>
+    <!-- Scan line -->
+    <line x1="5" y1="0" x2="80" y2="0" stroke="#00d4ff" stroke-width="1.5" opacity="0.8">
+      <animate attributeName="y1" values="0;110;0" dur="3s" repeatCount="indefinite"/>
+      <animate attributeName="y2" values="0;110;0" dur="3s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.8;0.3;0.8" dur="3s" repeatCount="indefinite"/>
+    </line>
+    <!-- Body silhouette -->
+    <path d="M20,68 Q42,62 64,68 L70,95 Q42,90 14,95 Z" stroke="#a855f7" stroke-width="1" fill="none" opacity="0.4"/>
+  </g>
+
+  <!-- Blockchain icon -->
+  <g transform="translate(720, 115)" opacity="0.8" filter="url(#softGlow)">
+    <rect x="0" y="0" width="30" height="20" rx="3" stroke="#a855f7" stroke-width="1.5" fill="none">
+      <animate attributeName="stroke" values="#a855f7;#00d4ff;#a855f7" dur="4s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="20" y="25" width="30" height="20" rx="3" stroke="#a855f7" stroke-width="1.5" fill="none">
+      <animate attributeName="stroke" values="#a855f7;#00d4ff;#a855f7" dur="4s" repeatCount="indefinite" begin="0.5s"/>
+    </rect>
+    <rect x="0" y="50" width="30" height="20" rx="3" stroke="#a855f7" stroke-width="1.5" fill="none">
+      <animate attributeName="stroke" values="#a855f7;#00d4ff;#a855f7" dur="4s" repeatCount="indefinite" begin="1s"/>
+    </rect>
+    <line x1="15" y1="20" x2="35" y2="25" stroke="#00d4ff" stroke-width="1" opacity="0.6"/>
+    <line x1="35" y1="45" x2="15" y2="50" stroke="#00d4ff" stroke-width="1" opacity="0.6"/>
+  </g>
+
+  <!-- Connection dots between face and blockchain -->
+  <g opacity="0.4">
+    <circle cx="260" cy="150" r="2" fill="#00d4ff">
+      <animate attributeName="opacity" values="0.2;0.8;0.2" dur="2s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="310" cy="150" r="2" fill="#a855f7">
+      <animate attributeName="opacity" values="0.2;0.8;0.2" dur="2s" repeatCount="indefinite" begin="0.3s"/>
+    </circle>
+    <circle cx="660" cy="150" r="2" fill="#a855f7">
+      <animate attributeName="opacity" values="0.2;0.8;0.2" dur="2s" repeatCount="indefinite" begin="0.6s"/>
+    </circle>
+    <circle cx="710" cy="150" r="2" fill="#00d4ff">
+      <animate attributeName="opacity" values="0.2;0.8;0.2" dur="2s" repeatCount="indefinite" begin="0.9s"/>
+    </circle>
+  </g>
+
+  <!-- Title text -->
+  <text x="450" y="130" text-anchor="middle" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="38" font-weight="700" fill="url(#textGrad)" filter="url(#glow)" letter-spacing="1">
+    Face ID + Blockchain
+  </text>
+  <text x="450" y="170" text-anchor="middle" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="38" font-weight="700" fill="url(#textGrad)" filter="url(#glow)" letter-spacing="1">
+    Verification
+  </text>
+
+  <!-- Decorative line under title -->
+  <rect x="250" y="185" width="400" height="2" rx="1" fill="url(#lineGrad)" opacity="0.8">
+    <animate attributeName="width" values="400;350;400" dur="4s" repeatCount="indefinite"/>
+    <animate attributeName="x" values="250;275;250" dur="4s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Subtitle -->
+  <text x="450" y="215" text-anchor="middle" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" fill="#94a3b8" letter-spacing="3" opacity="0.9">
+    PROVE IMAGE PROVENANCE ON-CHAIN
+  </text>
+
+  <!-- Tech stack tags -->
+  <g transform="translate(260, 240)" font-family="'Segoe UI', 'Courier New', monospace" font-size="11" fill="#64748b" letter-spacing="0.5">
+    <text x="0" y="0" fill="#00d4ff" opacity="0.7">OpenCV</text>
+    <text x="65" y="0" fill="#94a3b8" opacity="0.4">•</text>
+    <text x="80" y="0" fill="#a855f7" opacity="0.7">SFace</text>
+    <text x="130" y="0" fill="#94a3b8" opacity="0.4">•</text>
+    <text x="145" y="0" fill="#00d4ff" opacity="0.7">Google Lens</text>
+    <text x="235" y="0" fill="#94a3b8" opacity="0.4">•</text>
+    <text x="250" y="0" fill="#a855f7" opacity="0.7">Base Sepolia</text>
+    <text x="340" y="0" fill="#94a3b8" opacity="0.4">•</text>
+    <text x="355" y="0" fill="#00d4ff" opacity="0.7">SHA-256</text>
+  </g>
+
+  <!-- Border glow -->
+  <rect x="1" y="1" width="898" height="298" rx="12" fill="none" stroke="url(#lineGrad)" stroke-width="1" opacity="0.3"/>
+</svg>
