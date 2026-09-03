@@ -36,6 +36,9 @@ class TinEyeProvider(ReverseSearchProvider):
         self.api_key = api_key
         self.timeout = timeout
 
+    def describe(self) -> str:
+        return ENDPOINT
+
     def search(
         self,
         image_path: Path,

@@ -50,6 +50,9 @@ class LocalFixtureProvider(ReverseSearchProvider):
             )
         self.fixture_path = Path(fixture_path)
 
+    def describe(self) -> str:
+        return f"file://{self.fixture_path}"
+
     def search(
         self,
         image_path: Path,

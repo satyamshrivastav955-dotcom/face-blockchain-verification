@@ -3,6 +3,7 @@ Command-line entry point.
 
     python -m src.main doctor
     python -m src.main deploy
+    python -m src.main search   --image input/sample.jpg
     python -m src.main register --image input/sample.jpg
     python -m src.main verify   --record output/verification.json
     python -m src.main tamper-demo --record output/verification.json
@@ -30,6 +31,7 @@ explanation rather than a traceback at module load.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -52,6 +54,10 @@ examples:
 
   python -m src.main deploy --save
       Compile and deploy VerificationRegistry, writing CONTRACT_ADDRESS to .env.
+
+  python -m src.main search --image input/sample.jpg
+      Search stage only: check that the API key works and that this photo is
+      actually indexed, before spending a full run on it. No model, no wallet.
 
   python -m src.main register --image input/sample.jpg
       Full pipeline: detect a face, reverse-image search, confirm candidates
@@ -153,6 +159,142 @@ def cmd_register(args: argparse.Namespace) -> int:
         output=args.output,
         console=ui,
     )
+
+
+# ---------------------------------------------------------------------------
+# search
+# ---------------------------------------------------------------------------
+
+
+def cmd_search(args: argparse.Namespace) -> int:
+    """Run *only* the reverse-image search and print what came back, unfiltered.
+
+    The search is the one stage that depends on somebody else's service, which
+    makes it the likeliest thing to fail on the evening of a deadline: an
+    expired key, an exhausted free quota, or a photograph that simply is not
+    indexed anywhere. Diagnosing that needs no face model, no wallet and no
+    deployed contract, so this command loads none of them - it answers "does my
+    key work, and is this photo findable?" before anything expensive is tried.
+
+    It is also the honest place to inspect a provider's output. Nothing here
+    scores, filters or discards a candidate; what is printed is exactly what the
+    confirmation stage will be handed. A reader who suspects the match was
+    hardcoded can run this, see the unprocessed candidate list, and compare.
+    """
+    settings = _settings(args)
+    ui = _console(args)
+
+    image = _resolve(args.image)
+    if not image.exists():
+        ui.fail(f"no such image: {image}")
+        ui.info("put a photo in input/ and pass it with --image input/<file>.jpg")
+        return EXIT_ERROR
+
+    from .config import SOCIAL_DOMAINS
+    from .search import SearchError, build_provider, is_social, rank_candidates
+
+    ui.header("Reverse image search  -  search stage only")
+    ui.info("this command touches no face model, no wallet and no contract")
+
+    try:
+        provider = build_provider(args.provider or settings.search_provider, settings)
+    except SearchError as exc:
+        ui.fail(str(exc))
+        ui.info("run 'doctor' to see which keys are loaded - it never prints them")
+        return EXIT_ERROR
+
+    if provider.is_offline_stub and not args.allow_offline_stub:
+        ui.fail(f"provider '{provider.name}' is an offline stub, not a real search")
+        ui.info("pass --allow-offline-stub to use it for plumbing tests")
+        return EXIT_ERROR
+    if provider.is_offline_stub:
+        ui.banner(
+            [
+                "WARNING: offline fixture provider in use.",
+                "These candidates were read from a file, not searched for.",
+            ]
+        )
+
+    ui.step("Provider")
+    ui.field("name", provider.name)
+    ui.field("endpoint", provider.describe())
+    ui.field("needs public URL", "yes" if provider.needs_public_url else "no")
+    ui.field("query image", str(image))
+
+    query_url = args.image_url
+    if query_url:
+        ui.info("using the supplied --image-url; the image is not uploaded anywhere")
+    elif provider.needs_public_url:
+        from .publish import publish_image
+
+        ui.step("Publishing the query image")
+        ui.info(f"{provider.name} fetches the image by URL, so it has to be uploaded first")
+        ui.field("upload host", settings.publish_provider)
+        query_url = publish_image(
+            image, settings.publish_provider, imgbb_api_key=settings.imgbb_api_key
+        )
+        ui.ok(f"published at {query_url}")
+
+    limit = args.max_candidates or settings.max_candidates
+    ui.step("Searching")
+    try:
+        result = provider.search(image, image_url=query_url, max_results=limit)
+    except SearchError as exc:
+        ui.fail(str(exc))
+        ui.info("run 'doctor' to confirm the key is loaded, then check your quota")
+        ui.info("or try the other backend: --provider tineye / --provider serpapi_lens")
+        return EXIT_ERROR
+
+    ui.ok(f"{len(result.candidates)} candidate page(s) returned")
+    ui.field("searched at", result.searched_at)
+    if result.query_image_url:
+        ui.field("query image URL", result.query_image_url)
+    if result.quota_note:
+        ui.field("quota", result.quota_note)
+
+    if args.save_raw:
+        raw_path = _resolve(args.save_raw)
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_path.write_text(
+            json.dumps(
+                result.raw_response, indent=2, sort_keys=True, ensure_ascii=False, default=str
+            ),
+            encoding="utf-8",
+        )
+        ui.ok(f"raw provider response written to {raw_path}")
+
+    if not result.candidates:
+        ui.out()
+        ui.fail("nothing came back - a full run would exit 5, no confirmed match")
+        ui.info("that is a valid result, but it is not the demo you want")
+        ui.info("cross-check by hand: upload the same file at https://lens.google.com")
+        ui.info("if Lens finds nothing there either, pick a more widely published photo")
+        return EXIT_NO_MATCH
+
+    ranked = rank_candidates(result.candidates, SOCIAL_DOMAINS)
+    social_count = sum(1 for c in ranked if is_social(c.page_url, SOCIAL_DOMAINS))
+
+    ui.step(
+        f"Candidates in confirmation order  ({social_count} on social domains, checked first)"
+    )
+    for index, candidate in enumerate(ranked, start=1):
+        tag = "social" if is_social(candidate.page_url, SOCIAL_DOMAINS) else "other "
+        host = candidate.domain or "(no host)"
+        ui.out()
+        ui.out(f"  {index:>3}  {tag}  {host}   [provider position {candidate.position}]")
+        ui.out(f"       page   {candidate.page_url}")
+        ui.out(
+            f"       image  {candidate.best_image_url() or '(none - not confirmable, skipped)'}"
+        )
+        if candidate.title:
+            ui.out(f"       title  {candidate.title[:88]}")
+
+    downloadable = sum(1 for c in ranked if c.best_image_url())
+    ui.out()
+    ui.info(f"{downloadable} of {len(ranked)} carry an image URL and can be confirmed")
+    ui.info("none of these is a match yet: 'register' re-downloads each one, re-detects")
+    ui.info("the face, re-embeds it and re-hashes the pixels before believing any of it")
+    return EXIT_OK
 
 
 # ---------------------------------------------------------------------------
@@ -644,6 +786,57 @@ def build_parser() -> argparse.ArgumentParser:
     )
     register.add_argument("--output", default="", metavar="PATH", help="where to write the record")
     register.set_defaults(func=cmd_register)
+
+    # -- search ------------------------------------------------------------
+    search = subparsers.add_parser(
+        "search",
+        parents=[common],
+        help="run only the reverse-image search and print the raw candidates",
+        description=(
+            "Check the search stage on its own - no face model, no wallet, no "
+            "contract. Use it to confirm the API key works and that the photo is "
+            "indexed somewhere before spending a full run on it. Exits 5 if the "
+            "search returns nothing, the same as a full run would."
+        ),
+    )
+    search.add_argument("--image", required=True, metavar="PATH", help="input photo")
+    search.add_argument(
+        "--provider",
+        default="",
+        metavar="NAME",
+        help="reverse-search backend: serpapi_lens, tineye, local_fixture",
+    )
+    search.add_argument(
+        "--image-url",
+        default="",
+        metavar="URL",
+        help="public URL of the query image (skips uploading it)",
+    )
+    search.add_argument(
+        "--max-candidates",
+        type=int,
+        default=None,
+        metavar="N",
+        help="cap how many candidates are kept from the response",
+    )
+    search.add_argument(
+        "--fixture",
+        default="",
+        metavar="PATH",
+        help="offline candidate fixture (implies local_fixture)",
+    )
+    search.add_argument(
+        "--allow-offline-stub",
+        action="store_true",
+        help="permit the fixture provider - NOT a real search",
+    )
+    search.add_argument(
+        "--save-raw",
+        default="",
+        metavar="PATH",
+        help="write the provider's unedited JSON response to this file",
+    )
+    search.set_defaults(func=cmd_search)
 
     # -- verify ------------------------------------------------------------
     verify = subparsers.add_parser(
