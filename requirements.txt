@@ -1,0 +1,12 @@
+# Core pipeline
+opencv-python>=4.8,<6
+numpy>=1.24,<3
+requests>=2.31
+python-dotenv>=1.0
+
+# Blockchain
+web3>=6.20,<8
+py-solc-x>=2.0.2
+
+# Tests
+pytest>=8.0

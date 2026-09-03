@@ -1,0 +1,35 @@
+# ---- SECRETS: never commit ----
+.env
+*.pem
+*.key
+keystore/
+
+# ---- Downloaded model weights (fetched by scripts/fetch_models.py) ----
+models/*.onnx
+
+# ---- Generated artifacts ----
+output/
+evidence/
+contracts/build/
+localchain.json
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Keep the sample input, ignore anything else dropped in input/
+input/*
+!input/.gitkeep
+!input/README.md
