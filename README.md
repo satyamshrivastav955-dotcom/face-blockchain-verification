@@ -98,7 +98,7 @@ flowchart TD
 
 | File | Responsibility |
 | --- | --- |
-| `src/main.py` | CLI: `doctor`, `deploy`, `register`, `verify`, `tamper-demo`. Argument wiring and exit codes. |
+| `src/main.py` | CLI: `doctor`, `search`, `deploy`, `register`, `verify`, `tamper-demo`. Argument wiring and exit codes. |
 | `src/pipeline.py` | Orchestrates register and verify. The only place the step order lives. |
 | `src/faces.py` | YuNet detection, SFace embedding, cosine similarity. Plus a clearly-labelled stub engine for offline tests. |
 | `src/search/base.py` | The provider interface — `search(image_path, *, image_url, max_results) -> SearchResult` — plus `Candidate`, domain ranking, and the `needs_public_url` / `is_offline_stub` capability flags. |
@@ -165,7 +165,10 @@ capability flags `needs_public_url` and `is_offline_stub` let the pipeline adapt
 anything by name. There is also a local-fixture provider for offline development, and it is
 deliberately hard to misuse: it refuses to run unless you pass `--allow-offline-stub`, and when it does
 run it prints a full-width warning banner into the transcript and sets `"offline_stub": true` inside the
-record itself. A fake run cannot be mistaken for a real one, even in a screenshot.
+record itself. A fake run cannot be mistaken for a real one, even in a screenshot. The search stage
+also runs on its own via `python -m src.main search`, which loads no model, wallet or contract — it is
+both the cheapest way to check that a key is live and a photograph is indexed, and the plainest way to
+show a reader the provider's output before anything has judged it.
 
 Independent confirmation re-derives everything from the downloaded bytes: candidates are downloaded
 with a size cap, a timeout, a content-type check and a scheme allowlist, then re-detected, re-embedded,
@@ -347,7 +350,34 @@ both ONNX models are present and loadable, which configuration values are set (n
 the wallet address and balance, and whether the deployed contract answers. It exits non-zero if
 anything is missing, so it doubles as a CI gate. Add `--offline` to skip the network checks entirely.
 
-### 1 · Deploy the registry (once)
+### 1 · Check the search on its own
+
+```bash
+python -m src.main search --image input/sample.jpg
+```
+
+The search is the only stage that depends on somebody else's service, which makes it the only stage
+that can fail for reasons you cannot fix. This command runs it alone — no face model, no wallet, no
+deployed contract, no gas. Nothing is filtered out: every candidate the provider returned is printed,
+reordered so social domains come first because that is the order the confirmation stage will use, with
+each one's original position shown alongside so the reordering is visible rather than silent. Run it
+before paying for anything: it answers "is my key live, and is this photograph indexed anywhere?" in
+one call.
+
+It exits `5` when nothing comes back, the same code a full run would give, so the pre-flight result is
+directly comparable. If that happens, upload the same file by hand at
+[lens.google.com](https://lens.google.com) — SerpApi's `google_lens` engine is a wrapper around that
+same index, so if the browser finds nothing, no key or flag will change the outcome. Pick a photo with
+a wider published footprint instead.
+
+`--save-raw candidates.json` writes the provider's unedited JSON response to a file, which is the
+thing to open if you want to see what was thrown away during parsing. `--provider tineye` checks the
+other backend, and `--image-url URL` skips the upload if the image is already hosted somewhere public.
+
+Nothing here decides that anything matched. Every candidate printed is a lead and nothing more; the
+confirmation stage in step 3 re-downloads each one and re-derives the evidence locally.
+
+### 2 · Deploy the registry (once)
 
 ```bash
 python -m src.main deploy --save
@@ -362,7 +392,7 @@ Fund the burner wallet first from a Base Sepolia faucet — the [Coinbase Develo
 faucet](https://portal.cdp.coinbase.com/products/faucet) or
 [Alchemy's](https://www.alchemy.com/faucets/base-sepolia). Deployment costs well under 0.001 test ETH.
 
-### 2 · Register a face
+### 3 · Register a face
 
 ```bash
 python -m src.main register --image input/sample.jpg
@@ -377,7 +407,7 @@ Exits `5` if no candidate could be confirmed. That is a *successful* run of an h
 still writes `no_match_report.json` with every score so you can see how close it got. Recording that
 case is worth more than a third happy path.
 
-### 3 · Verify
+### 4 · Verify
 
 ```bash
 python -m src.main verify --record output/verification.json --image input/sample.jpg
@@ -398,7 +428,7 @@ Exit codes:
 | `5` | No confirmed match (from `register`). |
 | `130` | Interrupted. |
 
-### 4 · Demonstrate tamper-evidence
+### 5 · Demonstrate tamper-evidence
 
 ```bash
 python -m src.main tamper-demo --record output/verification.json --verify-original
@@ -424,6 +454,16 @@ python -m src.main register \
 This is **not a verification** and the tool says so, loudly, in three places: a warning banner for the
 stub engine, another for the fixture provider, and `"offline_stub": true` inside the record. The
 graded artefacts come from a real provider and the real network.
+
+The `search` stage alone runs offline too, which is the quickest way to see the candidate list and the
+social-first ordering without touching anything else:
+
+```bash
+python -m src.main search \
+  --image tests/data/query.png \
+  --fixture tests/data/candidates.json \
+  --allow-offline-stub --ascii
+```
 
 ---
 
@@ -512,6 +552,52 @@ zero there can only mean "never written". No extra `bool` and no extra slot.
 Real transcript, `--ascii`, from the offline review path (stub engine, fixture provider, simulated
 chain), lightly trimmed for width. A graded run looks the same minus the two warning banners, with a
 real domain and a real transaction hash.
+
+### `search`
+
+```
+--------------------------------------------------------------------
+  Reverse image search  -  search stage only
+--------------------------------------------------------------------
+    this command touches no face model, no wallet and no contract
+
+*************************************************************
+* WARNING: offline fixture provider in use.                 *
+* These candidates were read from a file, not searched for. *
+*************************************************************
+
+-> Provider
+  name:                  local_fixture
+  endpoint:              file://tests/data/candidates.json
+  needs public URL:      no
+  query image:           tests/data/query.png
+
+-> Searching
+  [OK] 2 candidate page(s) returned
+  searched at:           2026-09-03T05:20:59Z
+  quota:                 OFFLINE STUB - not a real search
+
+-> Candidates in confirmation order  (1 on social domains, checked first)
+
+    1  social  x.com   [provider position 2]
+       page   https://x.com/demo_user/status/1799887766554433221
+       image  tests/data/candidate_match.png
+       title  Synthetic post carrying a re-encode of the query image
+
+    2  other   example.org   [provider position 1]
+       page   https://example.org/blog/an-unrelated-post
+       image  tests/data/candidate_other.png
+       title  An unrelated article (should be rejected)
+
+    2 of 2 carry an image URL and can be confirmed
+    none of these is a match yet: 'register' re-downloads each one, re-detects
+    the face, re-embeds it and re-hashes the pixels before believing any of it
+```
+
+Note the `[provider position N]` annotations: the fixture returned `example.org` first and `x.com`
+second, and the ranking has swapped them. Keeping the provider's original position visible means the
+reordering is auditable rather than invisible — the reader can see exactly what was received and what
+was done to it.
 
 ### `register`
 
@@ -717,7 +803,7 @@ silently truncated.
 ## Tests
 
 ```bash
-python -m pytest tests -q          # 249 tests, no network, no keys, no models
+python -m pytest tests -q          # 258 tests, no network, no keys, no models
 ```
 
 The suite is hermetic: no network, no API keys, no ONNX weights, no funded wallet, and — enforced by
@@ -730,6 +816,13 @@ registry's first-write-wins guard and state persistence, the CLI's argument wiri
 the offline path can reach (0, 1, 2, 3, 5), and the safety gates — that the stub engine and fixture
 provider both refuse to run without `--allow-offline-stub`, that no embedding ever reaches the payload,
 and that `doctor` never prints a secret.
+
+The `search` subcommand is covered separately, including the properties that make it worth having: that
+it promotes social domains above the provider's own order, that it returns 5 on an empty result set just
+as a full run would, that `--save-raw` archives the provider's payload rather than the parsed view of
+it, and that without that flag it writes nothing at all. One of those tests is load-bearing in a way
+that is easy to miss — the suite runs with no ONNX weights present, so if `search` ever acquired a
+dependency on the face engine, it would fail there rather than on the evening of the deadline.
 
 `TestContractInvariants` asserts properties of the Solidity source directly as text — that the
 first-write-wins guard is present, that there is no privileged function, no deletion, and no biometric
@@ -840,7 +933,10 @@ host so Google can fetch it.
 An unedited screen recording of the complete pipeline. Suggested shape, about six minutes:
 
 Open with `python -m src.main doctor` — all green, secrets masked, and it establishes the environment
-is real. Then `deploy --save` and open the contract on BaseScan in a browser so the reviewer sees the
+is real. Then `search --image input/sample.jpg`, which is worth the thirty seconds it costs: it shows
+the provider's raw candidate list before anything has been judged, so the reviewer sees the leads
+arrive from outside the program and can watch the confirmation stage accept some and reject others
+later. Then `deploy --save` and open the contract on BaseScan in a browser so the reviewer sees the
 bytecode exists independently of this program. Then `register --image input/sample.jpg` on a first
 image, and let it run without cutting: the score table appearing row by row, with rejected candidates
 visible, is the strongest thirty seconds in the recording. Open `evidence/<run>/comparison.png` and
@@ -860,6 +956,7 @@ Before recording:
 - [ ] `chcp 65001` for Unicode, or add `--ascii` to every command.
 - [ ] Terminal font large enough to read at the recording resolution; window wide enough that the score table does not wrap.
 - [ ] `models/` populated and `doctor` green *before* the recording starts.
+- [ ] `search --image <your photo>` already returned candidates, so you know the image is findable. Discovering on camera that it is not indexed is a bad way to spend a take.
 - [ ] Delete `output/` and `evidence/` first, so the artefacts on screen were demonstrably produced by this run.
 - [ ] One continuous take. No cuts, no time-lapse. Waiting for a block confirmation on camera is a feature.
 
