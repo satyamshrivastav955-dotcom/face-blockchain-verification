@@ -128,7 +128,7 @@ class OpenCVFaceEngine:
         self,
         models_dir: str | Path,
         *,
-        score_threshold: float = 0.9,
+        score_threshold: float = 0.6,
         nms_threshold: float = 0.3,
         top_k: int = 5000,
     ) -> None:
