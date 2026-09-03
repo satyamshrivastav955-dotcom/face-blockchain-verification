@@ -25,6 +25,7 @@ class TestParser:
         actions = [a for a in parser._actions if a.dest == "command"]
         assert actions and set(actions[0].choices) == {
             "register",
+            "search",
             "verify",
             "tamper-demo",
             "doctor",
@@ -34,6 +35,15 @@ class TestParser:
     def test_register_requires_an_image(self, capsys):
         with pytest.raises(SystemExit):
             build_parser().parse_args(["register"])
+
+    def test_search_requires_an_image(self):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["search"])
+
+    def test_search_takes_no_chain_options(self):
+        """search never touches the chain, so offering --dry-run would be a lie."""
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["search", "--image", "x.png", "--dry-run"])
 
     def test_verify_defaults_to_the_standard_output_path(self):
         args = build_parser().parse_args(["verify"])
@@ -87,6 +97,11 @@ class TestMissingInputs:
 
     def test_tamper_demo_with_a_missing_record(self, tmp_path, isolated):
         assert main(["tamper-demo", "--record", str(tmp_path / "nope.json"), "--ascii"]) == 1
+
+    def test_search_with_a_missing_image(self, capsys, tmp_path, isolated):
+        code = main(["search", "--image", str(tmp_path / "nope.jpg"), "--ascii"])
+        assert code == 1
+        assert "no such image" in capsys.readouterr().out
 
 
 class TestOfflineStubGate:
@@ -174,6 +189,90 @@ class TestEndToEndThroughTheCli:
                 *extra,
             ]
         )
+
+    # -- search: the search stage on its own -------------------------------
+
+    def _search(self, project, *extra):
+        return main(
+            [
+                "search",
+                "--image",
+                str(project["query"]),
+                "--allow-offline-stub",
+                "--ascii",
+                "--env",
+                str(project["env"]),
+                "--fixture",
+                str(project["fixture"]),
+                *extra,
+            ]
+        )
+
+    def test_search_lists_candidates_social_first(self, project, capsys):
+        """Show the provider's output unfiltered, and rank social pages first.
+
+        No ONNX model exists in the test environment, which is what makes this
+        worth asserting: if `search` had grown a dependency on the face engine
+        it would fail here rather than on the evening of the deadline.
+        """
+        assert self._search(project) == 0
+        out = capsys.readouterr().out
+        assert "2 candidate page(s) returned" in out
+        # The fixture lists example.org first; ranking must promote x.com above it.
+        assert out.index("x.com") < out.index("example.org")
+        # A lead is not a match, and the command must not imply otherwise.
+        assert "CONFIRMED" not in out
+
+    def test_search_refuses_the_fixture_without_the_flag(self, project, capsys):
+        code = main(
+            [
+                "search",
+                "--image",
+                str(project["query"]),
+                "--fixture",
+                str(project["fixture"]),
+                "--ascii",
+                "--env",
+                str(project["env"]),
+            ]
+        )
+        assert code == 1
+        assert "offline stub" in capsys.readouterr().out
+
+    def test_search_with_no_candidates_exits_5(self, project, capsys):
+        """The same exit code a full run gives, so the pre-flight is comparable."""
+        empty = project["dir"] / "empty-fixture.json"
+        empty.write_text(json.dumps({"candidates": []}), encoding="utf-8")
+        code = main(
+            [
+                "search",
+                "--image",
+                str(project["query"]),
+                "--fixture",
+                str(empty),
+                "--allow-offline-stub",
+                "--ascii",
+                "--env",
+                str(project["env"]),
+            ]
+        )
+        assert code == 5
+        assert "exit 5" in capsys.readouterr().out
+
+    def test_search_save_raw_writes_the_providers_own_payload(self, project):
+        """--save-raw must archive what came back, not our parsed view of it."""
+        raw = project["dir"] / "raw" / "response.json"
+        assert self._search(project, "--save-raw", str(raw)) == 0
+        assert raw.exists()  # the parent directory is created for you
+        assert json.loads(raw.read_text(encoding="utf-8")) == json.loads(
+            project["fixture"].read_text(encoding="utf-8")
+        )
+
+    def test_search_writes_nothing_into_the_project_by_default(self, project):
+        """Without --save-raw it is a read-only probe: no evidence/, no record."""
+        assert self._search(project) == 0
+        assert not (project["dir"] / "evidence").exists()
+        assert not (project["dir"] / "output").exists()
 
     def test_register_then_verify_then_tamper(self, project, capsys):
         assert self._register(project) == 0

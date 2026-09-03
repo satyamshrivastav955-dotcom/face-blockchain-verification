@@ -240,6 +240,30 @@ class TestRegistry:
             build_provider("chatgpt", Settings())
         assert "serpapi_lens" in str(excinfo.value)
 
+    def test_describe_names_the_real_endpoint(self, tmp_path):
+        """`register` and `search` print describe() under the label "endpoint".
+
+        If it returned the provider's name instead, the recording would show a
+        line that reads like evidence of an outbound call while actually saying
+        nothing - so every provider has to name the address it really contacts.
+        """
+        settings = Settings()
+        settings.serpapi_key = "fake"
+        settings.tineye_api_key = "fake"
+        fixture = tmp_path / "f.json"
+        fixture.write_text(json.dumps({"candidates": []}), encoding="utf-8")
+        settings.fixture_path = str(fixture)
+
+        expected = {
+            "serpapi_lens": "https://serpapi.com/search.json",
+            "tineye": "https://api.tineye.com/rest/search/",
+            "local_fixture": f"file://{fixture}",
+        }
+        for name in PROVIDERS:
+            provider = build_provider(name, settings)
+            assert provider.describe() == expected[name]
+            assert provider.describe() != provider.name
+
 
 class TestLocalFixtureProvider:
     def test_is_flagged_as_a_stub(self, tmp_path):
