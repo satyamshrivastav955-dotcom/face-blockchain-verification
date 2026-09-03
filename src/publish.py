@@ -21,7 +21,7 @@ from pathlib import Path
 
 __all__ = ["PublishError", "publish_image", "PUBLISHERS"]
 
-PUBLISHERS = ("catbox", "imgbb", "none")
+PUBLISHERS = ("catbox", "uguu", "imgbb", "none")
 TIMEOUT = 90
 
 
@@ -29,23 +29,52 @@ class PublishError(RuntimeError):
     """The image could not be made publicly reachable."""
 
 
-def _publish_catbox(path: Path) -> str:
-    """Upload to catbox.moe. No API key required."""
+def _publish_uguu(path: Path) -> str:
+    """Upload to uguu.se. Free, no API key required."""
     import requests
 
     with path.open("rb") as fh:
         resp = requests.post(
-            "https://catbox.moe/user/api.php",
-            data={"reqtype": "fileupload"},
-            files={"fileToUpload": (path.name, fh)},
+            "https://uguu.se/upload",
+            files={"files[]": (path.name, fh)},
             timeout=TIMEOUT,
         )
     if resp.status_code != 200:
-        raise PublishError(f"catbox returned HTTP {resp.status_code}: {resp.text[:200]}")
-    url = resp.text.strip()
-    if not url.startswith("http"):
-        raise PublishError(f"catbox returned an unexpected body: {url[:200]}")
-    return url
+        raise PublishError(f"uguu returned HTTP {resp.status_code}: {resp.text[:200]}")
+    try:
+        data = resp.json()
+    except Exception as exc:
+        raise PublishError("uguu response was not JSON") from exc
+    files = data.get("files")
+    if not files or not isinstance(files, list):
+        raise PublishError(f"uguu returned no files in response: {data}")
+    url = files[0].get("url")
+    if not url:
+        raise PublishError(f"uguu file entry had no url: {files[0]}")
+    return str(url)
+
+
+def _publish_catbox(path: Path) -> str:
+    """Upload to catbox.moe with automatic fallback to uguu.se. No API key required."""
+    import requests
+
+    try:
+        with path.open("rb") as fh:
+            resp = requests.post(
+                "https://catbox.moe/user/api.php",
+                data={"reqtype": "fileupload"},
+                files={"fileToUpload": (path.name, fh)},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                timeout=TIMEOUT,
+            )
+        if resp.status_code == 200:
+            url = resp.text.strip()
+            if url.startswith("http"):
+                return url
+    except Exception:
+        pass
+    # Fallback to uguu.se if catbox blocks or fails
+    return _publish_uguu(path)
 
 
 def _publish_imgbb(path: Path, api_key: str) -> str:
@@ -84,10 +113,12 @@ def publish_image(path: str | Path, provider: str, *, imgbb_api_key: str = "") -
         raise PublishError(
             "PUBLISH_PROVIDER is 'none', so the image was not uploaded. Pass "
             "--image-url with a publicly reachable URL, or set PUBLISH_PROVIDER "
-            "to catbox or imgbb."
+            "to catbox, uguu, or imgbb."
         )
-    if key == "catbox":
+    if key in ("catbox", "auto", "free"):
         return _publish_catbox(p)
+    if key == "uguu":
+        return _publish_uguu(p)
     if key == "imgbb":
         return _publish_imgbb(p, imgbb_api_key)
     raise PublishError(
