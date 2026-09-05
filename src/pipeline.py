@@ -8,20 +8,20 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .canonical import canonicalize, digest_hex, fmt_score, sha256_bytes, sha256_file
-from .chain import ChainError, build_chain_client
+from .evidence.hashing import canonicalize, digest_hex, fmt_score, sha256_bytes, sha256_file
+from .blockchain.client import ChainError, build_chain_client
 from .config import SOCIAL_DOMAINS, ConfigError, Settings
-from .confirm import confirm_candidates, score_table, select_best
-from .evidence import EvidenceBundle, new_run_id
-from .faces import (
+from .verification.candidate_matcher import confirm_candidates, score_table, select_best
+from .evidence.bundle import EvidenceBundle, new_run_id
+from .vision.face_detector import (
     ModelMissingError,
     OpenCVFaceEngine,
     StubFaceEngine,
     embedding_fingerprint,
 )
-from .imaging import image_info, load_image, phash, phash_hex, side_by_side
+from .vision.preprocess import image_info, load_image, phash, phash_hex, side_by_side
 from .publish import publish_image
-from .record import (
+from .evidence.record import (
     Status,
     attach_anchor,
     build_payload,

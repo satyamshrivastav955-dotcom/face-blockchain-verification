@@ -24,8 +24,8 @@ from typing import Any
 
 import numpy as np
 
-from .canonical import sha256_bytes, sha256_file
-from .imaging import encode_png
+from .hashing import sha256_bytes, sha256_file
+from ..vision.preprocess import encode_png
 
 __all__ = ["EvidenceBundle", "new_run_id"]
 

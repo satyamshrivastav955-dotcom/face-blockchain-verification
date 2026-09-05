@@ -1,0 +1,175 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 220" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="pBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#090a16" />
+      <stop offset="50%" stop-color="#111226" />
+      <stop offset="100%" stop-color="#0b0d1e" />
+    </linearGradient>
+
+    <!-- Glowing Line Gradients -->
+    <linearGradient id="wireGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00d4ff" />
+      <stop offset="50%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+
+    <!-- Node Card Gradients -->
+    <linearGradient id="nodeGrad1" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e2238" />
+      <stop offset="100%" stop-color="#131627" />
+    </linearGradient>
+
+    <!-- Glow Filters -->
+    <filter id="glowBlue" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <filter id="glowGreen" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <style>
+      .node-card { rx: 10px; stroke-width: 1.5; transition: all 0.3s; }
+      .title-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; font-weight: 700; fill: #ffffff; }
+      .sub-text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 11px; fill: #94a3b8; }
+      .tag-text { font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 9.5px; font-weight: 600; }
+      .step-num { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 10px; font-weight: 800; fill: #a855f7; }
+
+      /* Flow pulse animation along line */
+      @keyframes dashMove {
+        from { stroke-dashoffset: 40; }
+        to { stroke-dashoffset: 0; }
+      }
+      .pulse-wire {
+        stroke: url(#wireGrad);
+        stroke-width: 2.5;
+        stroke-dasharray: 6 6;
+        animation: dashMove 1.2s linear infinite;
+      }
+      .wire-base {
+        stroke: #262b45;
+        stroke-width: 2.5;
+      }
+
+      /* Animated Glowing Packets */
+      @keyframes travelPacket1 {
+        0% { transform: translateX(0); opacity: 0; }
+        20% { opacity: 1; }
+        80% { opacity: 1; }
+        100% { transform: translateX(148px); opacity: 0; }
+      }
+      @keyframes pulseGlow {
+        0%, 100% { opacity: 0.4; transform: scale(1); }
+        50% { opacity: 0.9; transform: scale(1.08); }
+      }
+      .pulsing-ring {
+        transform-origin: center;
+        animation: pulseGlow 2.5s ease-in-out infinite;
+      }
+    </style>
+  </defs>
+
+  <!-- Container -->
+  <rect width="880" height="220" rx="14" fill="url(#pBg)" stroke="#232742" stroke-width="1.5"/>
+
+  <!-- Subtle Ambient Glow Orbs -->
+  <circle cx="100" cy="110" r="60" fill="#00d4ff" opacity="0.06" filter="url(#glowBlue)"/>
+  <circle cx="440" cy="110" r="70" fill="#a855f7" opacity="0.05" filter="url(#glowBlue)"/>
+  <circle cx="770" cy="110" r="60" fill="#10b981" opacity="0.06" filter="url(#glowGreen)"/>
+
+  <!-- Static Connecting Wires -->
+  <line x1="165" y1="110" x2="205" y2="110" class="wire-base" />
+  <line x1="335" y1="110" x2="375" y2="110" class="wire-base" />
+  <line x1="505" y1="110" x2="545" y2="110" class="wire-base" />
+  <line x1="675" y1="110" x2="715" y2="110" class="wire-base" />
+
+  <!-- Animated Pulse Wires -->
+  <line x1="165" y1="110" x2="205" y2="110" class="pulse-wire" />
+  <line x1="335" y1="110" x2="375" y2="110" class="pulse-wire" />
+  <line x1="505" y1="110" x2="545" y2="110" class="pulse-wire" />
+  <line x1="675" y1="110" x2="715" y2="110" class="pulse-wire" />
+
+  <!-- ==================== NODE 1: INPUT ==================== -->
+  <g transform="translate(35, 45)">
+    <rect width="130" height="130" class="node-card" fill="url(#nodeGrad1)" stroke="#00d4ff" stroke-opacity="0.6"/>
+    <!-- Icon Circle -->
+    <circle cx="65" cy="36" r="18" fill="#00d4ff" fill-opacity="0.12" stroke="#00d4ff" stroke-width="1.2"/>
+    <text x="65" y="42" font-size="18" text-anchor="middle">📷</text>
+    <text x="65" y="74" class="title-text" text-anchor="middle">1. Query Image</text>
+    <text x="65" y="92" class="sub-text" text-anchor="middle">Face Detection</text>
+    <rect x="20" y="103" width="90" height="18" rx="4" fill="#00d4ff" fill-opacity="0.1" stroke="#00d4ff" stroke-opacity="0.3"/>
+    <text x="65" y="115" class="tag-text" fill="#38bdf8" text-anchor="middle">YuNet (0.2MB)</text>
+  </g>
+
+  <!-- ==================== NODE 2: LOCAL EMBEDDING ==================== -->
+  <g transform="translate(205, 45)">
+    <rect width="130" height="130" class="node-card" fill="url(#nodeGrad1)" stroke="#38bdf8" stroke-opacity="0.5"/>
+    <circle cx="65" cy="36" r="18" fill="#38bdf8" fill-opacity="0.12" stroke="#38bdf8" stroke-width="1.2"/>
+    <text x="65" y="42" font-size="18" text-anchor="middle">🧠</text>
+    <text x="65" y="74" class="title-text" text-anchor="middle">2. Local SFace</text>
+    <text x="65" y="92" class="sub-text" text-anchor="middle">128-d Embedding</text>
+    <rect x="18" y="103" width="94" height="18" rx="4" fill="#38bdf8" fill-opacity="0.1" stroke="#38bdf8" stroke-opacity="0.3"/>
+    <text x="65" y="115" class="tag-text" fill="#7dd3fc" text-anchor="middle">🔒 Zero-Leak</text>
+  </g>
+
+  <!-- ==================== NODE 3: REVERSE SEARCH ==================== -->
+  <g transform="translate(375, 45)">
+    <rect width="130" height="130" class="node-card" fill="url(#nodeGrad1)" stroke="#a855f7" stroke-opacity="0.6"/>
+    <circle cx="65" cy="36" r="18" fill="#a855f7" fill-opacity="0.12" stroke="#a855f7" stroke-width="1.2"/>
+    <text x="65" y="42" font-size="18" text-anchor="middle">🌐</text>
+    <text x="65" y="74" class="title-text" text-anchor="middle">3. Reverse Search</text>
+    <text x="65" y="92" class="sub-text" text-anchor="middle">Lens · TinEye API</text>
+    <rect x="15" y="103" width="100" height="18" rx="4" fill="#a855f7" fill-opacity="0.1" stroke="#a855f7" stroke-opacity="0.3"/>
+    <text x="65" y="115" class="tag-text" fill="#c084fc" text-anchor="middle">Social Leads 1st</text>
+  </g>
+
+  <!-- ==================== NODE 4: INDEPENDENT CONFIRMATION ==================== -->
+  <g transform="translate(545, 45)">
+    <rect width="130" height="130" class="node-card" fill="url(#nodeGrad1)" stroke="#ec4899" stroke-opacity="0.6"/>
+    <circle cx="65" cy="36" r="18" fill="#ec4899" fill-opacity="0.12" stroke="#ec4899" stroke-width="1.2"/>
+    <text x="65" y="42" font-size="18" text-anchor="middle">🛡️</text>
+    <text x="65" y="74" class="title-text" text-anchor="middle">4. Dual Confirm</text>
+    <text x="65" y="92" class="sub-text" text-anchor="middle">Cosine &amp; pHash</text>
+    <rect x="14" y="103" width="102" height="18" rx="4" fill="#ec4899" fill-opacity="0.1" stroke="#ec4899" stroke-opacity="0.3"/>
+    <text x="65" y="115" class="tag-text" fill="#f472b6" text-anchor="middle">Anti-Hardcode</text>
+  </g>
+
+  <!-- ==================== NODE 5: BLOCKCHAIN ANCHOR ==================== -->
+  <g transform="translate(715, 45)">
+    <rect width="130" height="130" class="node-card" fill="url(#nodeGrad1)" stroke="#10b981" stroke-opacity="0.8" filter="url(#glowGreen)"/>
+    <circle cx="65" cy="36" r="18" fill="#10b981" fill-opacity="0.15" stroke="#10b981" stroke-width="1.5" class="pulsing-ring"/>
+    <text x="65" y="42" font-size="18" text-anchor="middle">⛓️</text>
+    <text x="65" y="74" class="title-text" text-anchor="middle">5. Base Sepolia</text>
+    <text x="65" y="92" class="sub-text" text-anchor="middle">Immutable Anchor</text>
+    <rect x="12" y="103" width="106" height="18" rx="4" fill="#10b981" fill-opacity="0.12" stroke="#10b981" stroke-opacity="0.4"/>
+    <text x="65" y="115" class="tag-text" fill="#34d399" text-anchor="middle">1st-Write-Wins</text>
+  </g>
+
+  <!-- Animated Pulse Beams / Data Packet Dots -->
+  <circle cx="185" cy="110" r="3.5" fill="#00d4ff" filter="url(#glowBlue)">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="355" cy="110" r="3.5" fill="#38bdf8" filter="url(#glowBlue)">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite" begin="0.3s"/>
+  </circle>
+  <circle cx="525" cy="110" r="3.5" fill="#a855f7" filter="url(#glowBlue)">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite" begin="0.6s"/>
+  </circle>
+  <circle cx="695" cy="110" r="3.5" fill="#10b981" filter="url(#glowGreen)">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="1.2s" repeatCount="indefinite" begin="0.9s"/>
+  </circle>
+
+  <!-- Bottom Subtitle / Flow Hint -->
+  <text x="440" y="202" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11.5" fill="#64748b" text-anchor="middle" font-weight="500">
+    ⚡ End-to-End Cryptographic Provenance · Zero Biometric Data Leaves Your Machine · Non-Repudiable On-Chain Proof
+  </text>
+</svg>

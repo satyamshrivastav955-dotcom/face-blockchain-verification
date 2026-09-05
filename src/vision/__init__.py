@@ -1,0 +1,51 @@
+"""Vision subsystem: image I/O, face detection, and face embedding."""
+
+from .face_detector import (
+    DET_MODEL_FILE,
+    REC_MODEL_FILE,
+    Face,
+    FaceEngine,
+    ModelMissingError,
+    NoFaceError,
+    OpenCVFaceEngine,
+    StubFaceEngine,
+    best_similarity,
+    cosine_similarity,
+    embedding_fingerprint,
+)
+from .preprocess import (
+    DownloadError,
+    ImageError,
+    encode_png,
+    fetch_image,
+    hamming,
+    image_info,
+    load_image,
+    phash,
+    phash_hex,
+    side_by_side,
+)
+
+__all__ = [
+    "DET_MODEL_FILE",
+    "REC_MODEL_FILE",
+    "DownloadError",
+    "Face",
+    "FaceEngine",
+    "ImageError",
+    "ModelMissingError",
+    "NoFaceError",
+    "OpenCVFaceEngine",
+    "StubFaceEngine",
+    "best_similarity",
+    "cosine_similarity",
+    "embedding_fingerprint",
+    "encode_png",
+    "fetch_image",
+    "hamming",
+    "image_info",
+    "load_image",
+    "phash",
+    "phash_hex",
+    "side_by_side",
+]

@@ -335,7 +335,7 @@ def cmd_tamper_demo(args: argparse.Namespace) -> int:
     naive edit is caught by arithmetic alone; the re-sealed edit is internally
     perfect and is caught *only* because its new hash was never anchored.
     """
-    from .record import (
+    from .evidence.record import (
         check_local_integrity,
         load_record,
         mutate_payload,
@@ -515,7 +515,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     # -- models ------------------------------------------------------------
     ui.step("Face models")
     try:
-        from .faces import DET_MODEL_FILE, REC_MODEL_FILE
+        from .vision.face_detector import DET_MODEL_FILE, REC_MODEL_FILE
     except ImportError:
         DET_MODEL_FILE = "face_detection_yunet_2023mar.onnx"
         REC_MODEL_FILE = "face_recognition_sface_2021dec.onnx"
@@ -560,7 +560,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     # -- contract artifact -------------------------------------------------
     ui.step("Contract")
-    from .chain import ARTIFACT_PATH, CONTRACT_SOURCE
+    from .blockchain.client import ARTIFACT_PATH, CONTRACT_SOURCE
 
     ui.field("source", "present" if CONTRACT_SOURCE.exists() else "MISSING")
     if not CONTRACT_SOURCE.exists():
@@ -576,7 +576,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         ui.step("Network")
         try:
-            from .chain import ChainError, EvmChainClient
+            from .blockchain.client import ChainError, EvmChainClient
 
             client = EvmChainClient(settings, require_signer=bool(settings.private_key))
             ui.ok(f"connected to {settings.rpc_url}")
@@ -655,7 +655,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     ui = _console(args)
     ui.header("Deploy VerificationRegistry")
 
-    from .chain import ARTIFACT_PATH, EvmChainClient, compile_contract
+    from .blockchain.client import ARTIFACT_PATH, EvmChainClient, compile_contract
 
     ui.step("Compiling")
     artifact = compile_contract(force=args.force_compile)

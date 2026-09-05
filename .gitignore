@@ -8,10 +8,10 @@ keystore/
 models/*.onnx
 
 # ---- Generated artifacts ----
-output/
-evidence/
-contracts/build/
-localchain.json
+/output/
+/evidence/
+/contracts/build/
+/localchain.json
 
 # ---- Python ----
 __pycache__/
