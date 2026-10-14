@@ -52,3 +52,48 @@ Instead of interacting with the verification engine through terminal commands, u
 │ Manifest · Reports│  │ Base Sepolia       │
 └───────────────────┘  └────────────────────┘
 ```
+
+### 🛠️ Proposed Frontend Stack
+
+| Component | Technology |
+|---|---|
+| Frontend | React + TypeScript + Vite |
+| UI and styling | Tailwind CSS + shadcn/ui |
+| Icons | Lucide |
+| Backend API | FastAPI |
+| Computer vision | Existing OpenCV-based pipeline |
+| Blockchain integration | Existing Web3.py client and Solidity registry |
+| Evidence format | JSON verification records and SHA-256 manifests |
+
+### 🔄 Intended User Workflow
+
+1. Upload an image and review the privacy implications.
+2. Run face detection and reverse-image search.
+3. Inspect candidate webpages and independent face-match results.
+4. Review the verification outcome and supporting evidence.
+5. Anchor a confirmed verification record on the configured blockchain.
+6. View the proof receipt, inspect the evidence bundle, or export the record.
+7. Independently verify a saved record at a later time.
+
+### 🔐 Security, Privacy & Verification
+
+FaceProof is designed around transparency and verifiable evidence.
+
+- Verification hashes are computed from canonicalized records.
+- The smart contract stores cryptographic commitments rather than face embeddings or image files.
+- Local integrity checks detect modifications to saved verification records.
+- Blockchain lookups establish whether the corresponding hash was registered and whether the source URL commitment agrees with the record.
+- Image uploads and third-party search services must be handled with explicit user consent and appropriate data-retention controls.
+- Testnet transactions and simulated blockchain results must be clearly distinguished from actual on-chain transactions.
+
+**Important limitation:** A matching face or image does not establish a person's legal identity, prove ownership of an image, or establish that a webpage is authentic. Blockchain anchoring proves that a particular cryptographic commitment was registered; it does not independently prove the underlying claim is true.
+
+### 🚧 Development Status
+
+The existing repository contains the Python verification pipeline, evidence-generation workflow, verification-record integrity checks, and Solidity registry.
+
+The web application described here is the proposed next development stage. Frontend screens, FastAPI endpoints, job tracking, and web-based evidence management should be marked complete only after they have been implemented and tested.
+
+---
+
+**Project direction:** Turn a working command-line verification engine into a user-friendly, auditable image provenance platform with transparent results and independently checkable blockchain evidence.
