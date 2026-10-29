@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, type Disclosure, type Health, type JobStatus } from "./api";
 import { JobView } from "./JobView";
+import { Custody, Ledger } from "./Rail";
 
 const TERMINAL = ["succeeded", "no_match", "failed", "cancelled"];
 
@@ -18,6 +19,7 @@ export function RegisterPanel({ health }: { health: Health }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [job, setJob] = useState<JobStatus | null>(null);
+  const [dragging, setDragging] = useState(false);
   const timer = useRef<number | undefined>(undefined);
 
   const providers = health.demo_mode ? ["local_fixture", "serpapi_lens", "tineye"] : ["serpapi_lens", "tineye"];
@@ -101,113 +103,122 @@ export function RegisterPanel({ health }: { health: Health }) {
     }
   }
 
+  function onDrop(ev: React.DragEvent) {
+    ev.preventDefault();
+    setDragging(false);
+    const f = ev.dataTransfer.files?.[0];
+    if (f && !busy) setFile(f);
+  }
+
+  const caseNo = job ? `FP-${job.id.slice(0, 8).toUpperCase()}` : "FP-········";
+
   return (
-    <div className="grid">
-      <form onSubmit={submit} className="card" aria-labelledby="reg-h">
-        <h2 id="reg-h">1. Choose an image</h2>
-        <label className="field">
-          <span>Image file (JPEG, PNG, WebP, GIF or BMP, up to {Math.round(health.limits.upload_bytes / 1048576)} MiB)</span>
-          <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} disabled={busy} />
-        </label>
-        {health.demo_mode && (
-          <button type="button" className="secondary" onClick={useSample} disabled={busy}>
-            Use the bundled synthetic sample
-          </button>
-        )}
-        {previewUrl ? (
-          <figure className="preview">
-            <img src={previewUrl} alt="Preview of the selected image" />
-            <figcaption className="muted">
-              Previewed in your browser only. Face analysis runs on this machine; nothing is uploaded until you consent
-              below.
-            </figcaption>
-          </figure>
-        ) : (
-          <p className="muted empty">No image selected.</p>
-        )}
+    <div className="casefile">
+      <header className="case-head">
+        <p className="folio">Case file · {caseNo}</p>
+        <h1 className="h1">Open a case</h1>
+        <p className="lede">
+          Mount an image. Faces are analysed here, every search lead is re-examined here, and the result is sealed. It measures provenance and never
+          identifies a person.
+        </p>
+        <Custody job={job} />
+      </header>
 
-        <h2>2. Search provider and privacy</h2>
-        <label className="field">
-          <span>Reverse-image search provider</span>
-          <select value={provider} onChange={(e) => setProvider(e.target.value)} disabled={busy}>
-            {providers.map((p) => (
-              <option key={p} value={p}>
-                {p === "local_fixture" ? "local_fixture (offline demo, no network)" : p}
-              </option>
-            ))}
-          </select>
-        </label>
-        {disclosure && !disclosure.external && (
-          <p className="note ok">Local only: no data leaves this machine for this provider.</p>
-        )}
-        {disclosure?.external && (
-          <fieldset className="consent">
-            <legend>This sends data to third parties</legend>
-            <ul>
-              {disclosure.items.map((i) => (
-                <li key={i.flag}>
-                  <strong>{i.service}</strong> receives: {i.what_is_sent}
-                </li>
-              ))}
-            </ul>
-            <p className="muted">
-              No retention or deletion promise is made here; that is governed by each service&apos;s own terms.
-            </p>
-            <label className="check">
-              <input type="checkbox" checked={consentSearch} onChange={(e) => setConsentSearch(e.target.checked)} />
-              <span>I consent to the external search described above.</span>
-            </label>
-            {needsUploadConsent && (
-              <label className="check">
-                <input type="checkbox" checked={consentUpload} onChange={(e) => setConsentUpload(e.target.checked)} />
-                <span>I consent to uploading this image to a public host.</span>
+      <div className="case-grid">
+        <div className="case-main">
+          <form onSubmit={submit} aria-label="New case">
+            <section className="plate" aria-labelledby="ex-a">
+              <h2 id="ex-a"><span className="tag-ex">Exhibit A</span> The image under examination</h2>
+              <div className="intake">
+                <label
+                  className={`mount${dragging ? " over" : ""}${previewUrl ? " has" : ""}`}
+                  onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={onDrop}
+                >
+                  <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} disabled={busy} />
+                  <i className="corner tl" /><i className="corner tr" /><i className="corner bl" /><i className="corner br" />
+                  {previewUrl ? (
+                    <img src={previewUrl} alt="Preview of the selected image" />
+                  ) : (
+                    <span className="mount-empty">
+                      <b>Drop the image here</b>
+                      <span>or click to choose a file</span>
+                      <small>JPEG · PNG · WebP · GIF · BMP — up to {Math.round(health.limits.upload_bytes / 1048576)} MiB</small>
+                    </span>
+                  )}
+                </label>
+                <div className="caption-plate">
+                  <h3>Label</h3>
+                  <dl>
+                    <div><dt>File</dt><dd>{file ? file.name : "—"}</dd></div>
+                    <div><dt>Size</dt><dd>{file ? `${(file.size / 1024).toFixed(0)} KiB` : "—"}</dd></div>
+                    <div><dt>Held</dt><dd>in your browser until you submit</dd></div>
+                  </dl>
+                  {health.demo_mode && (
+                    <button type="button" className="link" onClick={useSample} disabled={busy}>Mount the synthetic sample</button>
+                  )}
+                </div>
+              </div>
+            </section>
+
+            <section className="plate" aria-labelledby="ex-b">
+              <h2 id="ex-b"><span className="tag-ex">Notice</span> Disclosure and consent</h2>
+              <label className="field">
+                <span>Reverse-image search provider</span>
+                <select value={provider} onChange={(e) => setProvider(e.target.value)} disabled={busy}>
+                  {providers.map((p) => (
+                    <option key={p} value={p}>{p === "local_fixture" ? "local_fixture — offline demonstration, no network" : p}</option>
+                  ))}
+                </select>
               </label>
-            )}
-            <label className="field">
-              <span>Optional: URL of the image you host yourself (avoids any upload)</span>
-              <input type="url" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..." />
-            </label>
-          </fieldset>
-        )}
+              {disclosure && !disclosure.external && <p className="clear">Nothing leaves this machine for this provider.</p>}
+              {disclosure?.external && (
+                <fieldset className="disclosure">
+                  <legend>Data will be sent to third parties</legend>
+                  <ul>
+                    {disclosure.items.map((i) => (
+                      <li key={i.flag}><b>{i.service}</b> receives {i.what_is_sent}.</li>
+                    ))}
+                  </ul>
+                  <p className="muted">No retention or deletion promise is made here; each service&apos;s own terms govern.</p>
+                  <label className="check"><input type="checkbox" checked={consentSearch} onChange={(e) => setConsentSearch(e.target.checked)} /><span>I consent to the external search described above.</span></label>
+                  {needsUploadConsent && (
+                    <label className="check"><input type="checkbox" checked={consentUpload} onChange={(e) => setConsentUpload(e.target.checked)} /><span>I consent to uploading this image to a public host.</span></label>
+                  )}
+                  <label className="field">
+                    <span>Or give a link to an image you host yourself (no upload)</span>
+                    <input type="url" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" />
+                  </label>
+                </fieldset>
+              )}
+            </section>
 
-        <h2>3. Options</h2>
-        <label className="check">
-          <input type="checkbox" checked={simulate} disabled={!health.chain_writes_enabled || busy} onChange={(e) => setSimulate(e.target.checked)} />
-          <span>
-            Use the <strong>simulated</strong> local chain (a JSON file, not a blockchain)
-            {!health.chain_writes_enabled && " - real-chain writes are disabled on this server"}
-          </span>
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={requireFace} onChange={(e) => setRequireFace(e.target.checked)} disabled={busy} />
-          <span>Only register a face match (exclude image-similarity-only results)</span>
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={minimal} onChange={(e) => setMinimal(e.target.checked)} disabled={busy} />
-          <span>Minimal evidence (do not save face crops or downloaded image bytes)</span>
-        </label>
+            <section className="plate" aria-labelledby="ex-c">
+              <h2 id="ex-c"><span className="tag-ex">Terms</span> Instructions to the bureau</h2>
+              <label className="check">
+                <input type="checkbox" checked={simulate} disabled={!health.chain_writes_enabled || busy} onChange={(e) => setSimulate(e.target.checked)} />
+                <span>File on the <b>simulated</b> ledger (a JSON file, not a blockchain){!health.chain_writes_enabled && " — real-chain writes are disabled on this server"}</span>
+              </label>
+              <label className="check"><input type="checkbox" checked={requireFace} onChange={(e) => setRequireFace(e.target.checked)} disabled={busy} /><span>Accept a face match only; refuse image-similarity-only findings</span></label>
+              <label className="check"><input type="checkbox" checked={minimal} onChange={(e) => setMinimal(e.target.checked)} disabled={busy} /><span>Minimal evidence: keep no face crops or downloaded image bytes</span></label>
 
-        {error && (
-          <p className="banner error" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="row">
-          <button type="submit" disabled={!file || busy || !consentOk}>
-            {busy ? "Running..." : "Start verification"}
-          </button>
-          {busy && (
-            <button type="button" className="secondary" onClick={cancel}>
-              Cancel
-            </button>
-          )}
+              {error && <p className="notice err" role="alert">{error}</p>}
+              <div className="row">
+                <button type="submit" className="btn solid" disabled={!file || busy || !consentOk}>{busy ? "Examining…" : "Begin examination"}</button>
+                {busy && <button type="button" className="btn" onClick={cancel}>Withdraw</button>}
+              </div>
+              {!consentOk && <p className="muted">Tick the consent above to enable the external search.</p>}
+            </section>
+          </form>
+
+          <section aria-live="polite" aria-label="Findings" className="findings-area">
+            {job ? <JobView job={job} health={health} /> : <p className="empty">The schedule of candidates, findings and sealed record will be filed here.</p>}
+          </section>
         </div>
-        {!consentOk && <p className="muted">Tick the consent box(es) above to enable the external search.</p>}
-      </form>
 
-      <section aria-live="polite" aria-label="Result">
-        {job ? <JobView job={job} health={health} /> : <p className="muted empty card">Results appear here once a run starts.</p>}
-      </section>
+        <Ledger job={job} health={health} />
+      </div>
     </div>
   );
 }

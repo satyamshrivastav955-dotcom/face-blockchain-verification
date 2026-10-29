@@ -270,6 +270,10 @@ python -m src.web                  # http://127.0.0.1:8765  (loopback only)
 python -m src.web --demo           # + stub engine and offline fixture, labelled on every screen
 ```
 
+<div align="center">
+  <img src="assets/landing_page.png" alt="FaceProof landing page: evidence-dossier design with hero, procedure, the two evidence types, findings and chain of custody" width="760"/>
+</div>
+
 Journey: upload + preview → privacy panel and consent boxes (what is sent to whom) → job with real stage
 status → candidates table with outcome labels in text, face-match vs image-derivative evidence, comparison
 image, claim and limitations → download record/manifest → "Verify this record" and a separate *Check a
