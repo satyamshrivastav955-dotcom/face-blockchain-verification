@@ -11,7 +11,17 @@ differing byte changes the SHA-256, and an untampered record then reports as
 tampered. That failure is intermittent and extremely expensive to debug, so
 canonicalization is treated as a first-class, separately tested component.
 
-We follow RFC 8785 (JSON Canonicalization Scheme):
+THIS IS A RESTRICTED PROFILE OF RFC 8785, NOT A FULL IMPLEMENTATION
+================================================================
+For every value it accepts, the output is byte-identical to RFC 8785 (JCS).
+But it deliberately *rejects* inputs JCS would handle (floats, integers outside
+the I-JSON safe range), so it must not be described as a general JCS library.
+New records therefore declare ``sha256-jcs-rfc8785-restricted-v1``. Records
+sealed by earlier builds declare ``sha256-jcs-rfc8785``; they are still
+verified, with the historical (un-bounded integer) rules, via
+``canonicalize(..., legacy=True)`` - see ``record.py``.
+
+Behaviour, per RFC 8785:
 
   * object keys sorted by UTF-16 code unit  (not Python's default code-point
     order - see ``_utf16_sort_key``)
@@ -19,7 +29,15 @@ We follow RFC 8785 (JSON Canonicalization Scheme):
   * unicode emitted literally as UTF-8     -> no \\uXXXX escapes
   * output encoded as UTF-8
 
-...with one deliberate tightening: **floats are rejected outright.** RFC 8785
+...with deliberate tightenings:
+
+* integers must lie within +/-(2**53 - 1) (the I-JSON / ES6 exact range);
+  beyond it ES6 ``Number::toString`` and Python ``str(int)`` disagree;
+* strings must be well-formed Unicode (lone surrogates are rejected, RFC 8785
+  section 3.2.2 / I-JSON);
+* nesting depth is bounded.
+
+**Floats are rejected outright.** RFC 8785
 specifies float serialization via the ES6 ``Number::toString`` algorithm, which
 CPython's ``repr`` does not implement. Rather than ship a subtly non-compliant
 float serializer, we forbid floats in payloads entirely. Every number in a
@@ -37,6 +55,8 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "MAX_SAFE_INTEGER",
+    "MAX_DEPTH",
     "CanonicalizationError",
     "canonicalize",
     "digest",
@@ -45,6 +65,9 @@ __all__ = [
     "sha256_bytes",
     "sha256_file",
 ]
+
+MAX_SAFE_INTEGER = 2**53 - 1
+MAX_DEPTH = 64
 
 # Read files in 1 MiB chunks so a large image never has to sit in memory twice.
 _CHUNK = 1024 * 1024
@@ -71,7 +94,7 @@ def _utf16_sort_key(s: str) -> bytes:
     return s.encode("utf-16-be", errors="surrogatepass")
 
 
-def _encode_string(s: str) -> str:
+def _encode_string(s: str, path: str = "") -> str:
     """Serialize a JSON string per RFC 8785.
 
     ``json.dumps`` with ``ensure_ascii=False`` already implements exactly the
@@ -79,14 +102,22 @@ def _encode_string(s: str) -> str:
     characters, preferring the two-character forms (\\b \\t \\n \\f \\r) and
     falling back to \\u00XX; emit every other character literally.
     """
+    try:
+        s.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise CanonicalizationError(
+            f"string at {path!r} is not well-formed Unicode (lone surrogate)"
+        ) from exc
     return json.dumps(s, ensure_ascii=False)
 
 
-def _write(value: Any, out: list[str], path: str) -> None:
+def _write(value: Any, out: list[str], path: str, legacy: bool, depth: int = 0) -> None:
     """Recursively append the canonical form of *value* to *out*.
 
     *path* is a dotted breadcrumb used only to make error messages actionable.
     """
+    if depth > MAX_DEPTH:
+        raise CanonicalizationError(f"nesting deeper than {MAX_DEPTH} at {path!r}")
     # bool must be tested before int: isinstance(True, int) is True in Python.
     if value is None:
         out.append("null")
@@ -95,8 +126,12 @@ def _write(value: Any, out: list[str], path: str) -> None:
     elif value is False:
         out.append("false")
     elif isinstance(value, str):
-        out.append(_encode_string(value))
+        out.append(_encode_string(value, path))
     elif isinstance(value, int):
+        if not legacy and abs(value) > MAX_SAFE_INTEGER:
+            raise CanonicalizationError(
+                f"integer at {path!r} is outside +/-(2**53-1); store it as a string"
+            )
         out.append(str(value))
     elif isinstance(value, float):
         raise CanonicalizationError(
@@ -120,9 +155,9 @@ def _write(value: Any, out: list[str], path: str) -> None:
         for i, key in enumerate(sorted(value, key=_utf16_sort_key)):
             if i:
                 out.append(",")
-            out.append(_encode_string(key))
+            out.append(_encode_string(key, path))
             out.append(":")
-            _write(value[key], out, f"{path}.{key}" if path else key)
+            _write(value[key], out, f"{path}.{key}" if path else key, legacy, depth + 1)
         out.append("}")
     elif isinstance(value, (list, tuple)):
         # Array order is significant and is preserved verbatim.
@@ -130,7 +165,7 @@ def _write(value: Any, out: list[str], path: str) -> None:
         for i, item in enumerate(value):
             if i:
                 out.append(",")
-            _write(item, out, f"{path}[{i}]")
+            _write(item, out, f"{path}[{i}]", legacy, depth + 1)
         out.append("]")
     else:
         raise CanonicalizationError(
@@ -139,25 +174,30 @@ def _write(value: Any, out: list[str], path: str) -> None:
         )
 
 
-def canonicalize(obj: Any) -> bytes:
-    """Return the RFC 8785 canonical UTF-8 encoding of *obj*."""
+def canonicalize(obj: Any, *, legacy: bool = False) -> bytes:
+    """Return the canonical UTF-8 encoding of *obj* (restricted RFC 8785 profile).
+
+    ``legacy=True`` re-creates the rules of builds that declared the algorithm
+    ``sha256-jcs-rfc8785``: identical output, but integers are not range-checked.
+    It exists only to re-verify historical records.
+    """
     parts: list[str] = []
-    _write(obj, parts, "")
+    _write(obj, parts, "", legacy)
     return "".join(parts).encode("utf-8")
 
 
-def digest(obj: Any) -> bytes:
+def digest(obj: Any, *, legacy: bool = False) -> bytes:
     """SHA-256 of the canonical encoding of *obj* (32 raw bytes)."""
-    return hashlib.sha256(canonicalize(obj)).digest()
+    return hashlib.sha256(canonicalize(obj, legacy=legacy)).digest()
 
 
-def digest_hex(obj: Any, prefix: bool = True) -> str:
+def digest_hex(obj: Any, prefix: bool = True, *, legacy: bool = False) -> str:
     """SHA-256 of the canonical encoding of *obj* as hex.
 
     With ``prefix=True`` the result is ``0x``-prefixed, which is the form the
     smart contract expects for a ``bytes32`` argument.
     """
-    h = hashlib.sha256(canonicalize(obj)).hexdigest()
+    h = hashlib.sha256(canonicalize(obj, legacy=legacy)).hexdigest()
     return f"0x{h}" if prefix else h
 
 

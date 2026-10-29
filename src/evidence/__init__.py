@@ -12,7 +12,9 @@ from .hashing import (
 )
 from .record import (
     INTEGRITY_ALGORITHM,
+    LEGACY_ALGORITHM,
     LocalCheck,
+    RecordError,
     Status,
     attach_anchor,
     build_payload,
@@ -28,7 +30,9 @@ __all__ = [
     "CanonicalizationError",
     "EvidenceBundle",
     "INTEGRITY_ALGORITHM",
+    "LEGACY_ALGORITHM",
     "LocalCheck",
+    "RecordError",
     "Status",
     "attach_anchor",
     "build_payload",

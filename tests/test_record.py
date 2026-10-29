@@ -238,12 +238,24 @@ class TestPersistence:
 
 
 class TestNotes:
-    def test_algorithm_change_is_noted(self):
+    def test_unknown_algorithm_fails_closed(self):
+        """An unsupported algorithm must never be re-interpreted under ours.
+
+        (Replaces an older test that accepted an unknown algorithm with a note:
+        that reinterpreted the record and still reported a valid hash.)
+        """
         record = seal(sample_payload())
         record["integrity"]["algorithm"] = "sha256-someone-elses-scheme"
         check = check_local_integrity(record)
-        assert check.ok  # the bytes still agree...
-        assert any("algorithm" in note for note in check.notes)  # ...but flag it
+        assert not check.ok
+        assert "unsupported integrity algorithm" in check.error
+
+    def test_historical_algorithm_label_still_verifies(self):
+        record = seal(sample_payload())
+        record["integrity"]["algorithm"] = "sha256-jcs-rfc8785"
+        check = check_local_integrity(record)
+        assert check.ok
+        assert any("historical" in note for note in check.notes)
 
     def test_canonical_length_change_is_noted(self):
         record = seal(sample_payload())
