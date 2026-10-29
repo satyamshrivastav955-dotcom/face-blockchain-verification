@@ -1,0 +1,7 @@
+# Optional: the local FaceProof web app (backend). Frontend: web/package.json.
+-r requirements.txt
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9
+# for the API tests (starlette TestClient)
+httpx>=0.27
