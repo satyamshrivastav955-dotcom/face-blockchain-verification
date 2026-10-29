@@ -1,0 +1,67 @@
+# Tool configuration only. Dependencies live in requirements*.txt (one system,
+# not two); this project is run as `python -m src.main`, not installed as a package.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [".venv", "contracts/build"]
+
+[tool.ruff.lint]
+# Correctness-oriented rules only: pyflakes, pycodestyle, bugbear.
+select = ["E", "F", "W", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Backward-compatibility shims re-export everything on purpose.
+"src/canonical.py" = ["F401"]
+"src/chain.py" = ["F401"]
+"src/confirm.py" = ["F401"]
+"src/faces.py" = ["F401"]
+"src/imaging.py" = ["F401"]
+"src/record.py" = ["F401"]
+# FastAPI declares request parts as File(...) / Form(...) defaults by design.
+"src/web/app.py" = ["B008"]
+# Test data tables are clearer on long lines.
+"tests/*" = ["E501"]
+
+[tool.ruff.format]
+# Pre-existing modules that predate the formatter. Formatting them would rewrite
+# most of the repository for no behavioural benefit; files created or rewritten
+# in the hardening pass ARE formatted and checked. Remove entries as files are
+# touched and reformatted.
+exclude = [
+    "src/canonical.py",
+    "src/chain.py",
+    "src/config.py",
+    "src/confirm.py",
+    "src/evidence/bundle.py",
+    "src/evidence/hashing.py",
+    "src/evidence/record.py",
+    "src/faces.py",
+    "src/imaging.py",
+    "src/main.py",
+    "src/publish.py",
+    "src/record.py",
+    "src/search/__init__.py",
+    "src/search/base.py",
+    "src/search/local_fixture.py",
+    "src/search/serpapi_lens.py",
+    "src/search/tineye.py",
+    "src/vision/face_detector.py",
+    "src/vision/preprocess.py",
+    "tests/test_chain.py",
+    "tests/test_cli.py",
+    "tests/test_confirm.py",
+    "tests/test_pipeline_offline.py",
+    "tests/test_search.py",
+]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src", "scripts"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true

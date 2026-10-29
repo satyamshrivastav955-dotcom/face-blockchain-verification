@@ -1,0 +1,13 @@
+# Development / CI extras. Install with:  pip install -r requirements-dev.txt -c constraints.txt
+-r requirements.txt
+-r requirements-web.txt
+
+pytest>=8.0
+ruff>=0.6
+mypy>=1.10
+types-requests
+
+# In-process EVM for the contract behaviour tests (tests/test_registry_evm.py).
+# The tests skip, with a reason, if this is not installed. py-evm needs a C
+# toolchain on some platforms (Windows); Linux CI installs it from wheels.
+eth-tester[py-evm]>=0.12,<1

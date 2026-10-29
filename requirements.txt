@@ -4,9 +4,8 @@ numpy>=1.24,<3
 requests>=2.31
 python-dotenv>=1.0
 
-# Blockchain
-web3>=6.20,<8
+# Blockchain (web3.py 7.x API; web3 6 is no longer supported by the client)
+web3>=7.0,<8
 py-solc-x>=2.0.2
 
-# Tests
-pytest>=8.0
+# Tests: see requirements-dev.txt. Reproducible installs: constraints.txt

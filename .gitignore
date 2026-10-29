@@ -33,3 +33,8 @@ Thumbs.db
 input/*
 !input/.gitkeep
 !input/README.md
+
+# ---- Web frontend ----
+/web/node_modules/
+/web/dist/
+.ruff_cache/

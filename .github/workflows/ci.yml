@@ -1,0 +1,86 @@
+name: CI
+
+# Hermetic: no secrets, no paid APIs, no model downloads, no private keys, no
+# blockchain transactions. The contract tests run on an in-process EVM and only
+# need solc 0.8.24, which py-solc-x downloads from the official solc binaries
+# repository (a read-only download, no credentials).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+            constraints.txt
+
+      - name: Install (pinned by constraints.txt)
+        run: |
+          python -m pip install --upgrade pip
+          # constraints.txt was resolved on Windows/3.13; the EVM stack is left
+          # unconstrained so py-evm resolves its own platform-correct set.
+          grep -viE '^(eth-tester|py-evm|lru-dict|pywin32)==' constraints.txt > ci-constraints.txt || true
+          pip install -r requirements-dev.txt -c ci-constraints.txt
+
+      - name: Install solc 0.8.24 (for contract compilation tests)
+        run: python -c "import solcx; solcx.install_solc('0.8.24')"
+
+      - name: Lint (ruff)
+        run: ruff check src tests scripts
+
+      - name: Formatting (ruff format)
+        run: ruff format --check src tests scripts
+
+      - name: Types (mypy)
+        run: mypy
+
+      - name: Compile
+        run: python -m compileall -q src tests scripts
+
+      - name: Tests
+        run: python -m pytest tests -q -ra
+
+      - name: CLI smoke test (offline, no secrets)
+        run: python -m src.main --help
+
+      - name: Compile the registry contract
+        run: python -m src.main deploy --compile-only --force-compile
+
+  frontend:
+    name: Web frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build
