@@ -29,7 +29,7 @@ from src.pipeline import EXIT_ERROR, EXIT_NO_MATCH, EXIT_OK, run_register, run_v
 from src.record import Status, check_local_integrity, load_record, mutate_payload, seal, save_record
 from src.ui import Console
 
-from conftest import make_blob, make_stripes, rewrite, write_png
+from conftest import make_blob, make_stripes, write_png
 
 
 def register(settings, scene, **kwargs) -> int:
@@ -86,7 +86,7 @@ class TestRegister:
         """
         payload = load_record(registered)["payload"]
         assert payload["face"]["embedding_on_chain"] is False
-        assert len(payload["face"]["embedding_sha256"]) == 64
+        assert len(payload["face"]["embedding_commitment_sha256"]) == 64
         assert "embedding" not in payload["match"]
         assert "embedding" not in payload["face"]["primary"]
         assert _numeric_vectors(payload) == [], "a raw vector reached the record"
@@ -298,7 +298,7 @@ class TestTamperDetection:
             ("match.face_similarity", "0.9999"),
             ("match.matched_image_sha256", "0" * 64),
             ("source_image.sha256", "1" * 64),
-            ("face.embedding_sha256", "2" * 64),
+            ("face.embedding_commitment_sha256", "2" * 64),
             ("search.candidates_returned", 999),
         ],
     )

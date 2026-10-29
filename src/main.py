@@ -19,6 +19,10 @@ CI job) can tell *how* a record failed without parsing prose.
     3  not anchored on-chain    - the hash was never registered
     4  anchor mismatch          - anchored, but conflicts with the record
     5  no confirmed match       - the pipeline ran and honestly found nothing
+    6  inconclusive             - a required check could not be completed
+                                  (RPC down, incompatible contract, failed
+                                  URL-commitment lookup). NOT a success and NOT
+                                  a mismatch: nothing is claimed either way.
 
 WHY THE IMPORTS ARE LAZY
 ========================
@@ -45,6 +49,7 @@ __all__ = ["main", "build_parser"]
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_NO_MATCH = 5
+EXIT_INCONCLUSIVE = 6
 
 EPILOG = """\
 examples:
@@ -52,19 +57,25 @@ examples:
       Check the environment before anything else: dependencies, model files,
       .env, wallet balance and whether the contract is reachable.
 
-  python -m src.main deploy --save
-      Compile and deploy VerificationRegistry, writing CONTRACT_ADDRESS to .env.
+  python -m src.main deploy --compile-only
+      Compile the registry (no network, no gas). A real deployment needs
+      'deploy --yes' and spends gas - see README > Manual deployment.
 
-  python -m src.main search --image input/sample.jpg
-      Search stage only: check that the API key works and that this photo is
-      actually indexed, before spending a full run on it. No model, no wallet.
+  python -m src.main register --image input/sample.jpg --dry-run --engine stub
+      --fixture tests/data/candidates.json --allow-offline-stub
+      LOCAL-ONLY rehearsal: no network, no wallet, no upload. Produces a
+      record labelled test-only and simulated.
 
-  python -m src.main register --image input/sample.jpg
-      Full pipeline: detect a face, reverse-image search, confirm candidates
-      locally, then anchor the sealed record on Base Sepolia.
+  python -m src.main register --image input/sample.jpg --consent-external-search
+      Real run. Sends data to the search provider (and, if needed,
+      --consent-public-upload for a public image host). Refuses without consent.
 
   python -m src.main verify --record output/verification.json --image input/sample.jpg
       Recompute the hash, bind it to the image file, and look it up on-chain.
+      Add --json for a machine-readable result on stdout.
+
+  python -m src.main purge-evidence --older-than-days 30
+      List (and with --yes delete) local evidence bundles older than N days.
 
   python -m src.main tamper-demo --record output/verification.json
       Show both tamper classes: a naive edit (caught offline) and a re-sealed
@@ -72,7 +83,7 @@ examples:
 
 exit codes:
   0 ok   1 error   2 hash mismatch   3 not anchored   4 anchor mismatch
-  5 no confirmed match
+  5 no confirmed match   6 inconclusive (a required check could not run)
 """
 
 
@@ -102,26 +113,20 @@ def _settings(args: argparse.Namespace) -> Settings:
         settings.rpc_url = args.rpc_url
     if getattr(args, "contract", ""):
         settings.contract_address = args.contract
+    settings.validate()
     return settings
 
 
 def _mask(value: str, *, reveal_tail: bool = True) -> str:
     """Describe a secret without disclosing it.
 
-    Used by ``doctor``, which is likely to be on screen during the recording.
-    The last four characters are shown for API keys, which is enough to tell
-    two keys apart when something is misconfigured. For a private key even that
-    is withheld: knowing which key is loaded is not worth narrowing the
-    keyspace on camera, and the signer's public address (printed by the network
-    check) already identifies it unambiguously.
+    Used by ``doctor``, which may be on screen or pasted into a bug report, so
+    no part of a secret is ever shown - only whether it is set and its length.
+    (``reveal_tail`` is kept for call compatibility and is ignored.)
     """
     if not value:
         return "not set"
-    if len(value) <= 8:
-        return "set"
-    if not reveal_tail:
-        return f"set ({len(value)} chars)"
-    return f"set ({len(value)} chars, ends ...{value[-4:]})"
+    return f"set ({len(value)} chars)"
 
 
 def _resolve(path_str: str) -> Path:
@@ -156,6 +161,10 @@ def cmd_register(args: argparse.Namespace) -> int:
         max_candidates=args.max_candidates,
         stop_early=args.stop_early,
         allow_offline_stub=args.allow_offline_stub,
+        consent_external_search=args.consent_external_search,
+        consent_public_upload=args.consent_public_upload,
+        require_face_match=args.require_face_match,
+        minimal_evidence=args.minimal_evidence,
         output=args.output,
         console=ui,
     )
@@ -215,6 +224,26 @@ def cmd_search(args: argparse.Namespace) -> int:
             ]
         )
 
+    if not provider.is_offline_stub:
+        from .privacy import ConsentError, require_consent
+
+        try:
+            require_consent(
+                provider_name=provider.name,
+                is_offline_stub=False,
+                needs_public_url=provider.needs_public_url,
+                publish_provider=settings.publish_provider,
+                have_image_url=bool(args.image_url),
+                consent_external_search=args.consent_external_search,
+                consent_public_upload=args.consent_public_upload,
+            )
+        except ConsentError as exc:
+            first, *rest = str(exc).splitlines()
+            ui.fail(first)
+            for line in rest:
+                ui.info(line)
+            return EXIT_ERROR
+
     ui.step("Provider")
     ui.field("name", provider.name)
     ui.field("endpoint", provider.describe())
@@ -227,12 +256,18 @@ def cmd_search(args: argparse.Namespace) -> int:
     elif provider.needs_public_url:
         from .publish import publish_image
 
+        from .publish import PublishError
+
         ui.step("Publishing the query image")
         ui.info(f"{provider.name} fetches the image by URL, so it has to be uploaded first")
         ui.field("upload host", settings.publish_provider)
-        query_url = publish_image(
-            image, settings.publish_provider, imgbb_api_key=settings.imgbb_api_key
-        )
+        try:
+            query_url = publish_image(
+                image, settings.publish_provider, imgbb_api_key=settings.imgbb_api_key
+            )
+        except PublishError as exc:
+            ui.fail(f"could not publish the query image: {exc}")
+            return EXIT_ERROR
         ui.ok(f"published at {query_url}")
 
     limit = args.max_candidates or settings.max_candidates
@@ -314,13 +349,30 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
     from .pipeline import run_verify
 
-    return run_verify(
-        settings,
-        record,
-        dry_run=args.dry_run,
-        image_path=_resolve(args.image) if args.image else None,
-        console=ui,
-    )
+    report: dict = {}
+    if args.json:
+        # Human-readable progress goes to stderr so stdout is pure JSON.
+        from .ui import Console
+
+        ui = Console(stream=sys.stderr, force_ascii=getattr(args, "ascii", False))
+    try:
+        code = run_verify(
+            settings,
+            record,
+            dry_run=args.dry_run,
+            image_path=_resolve(args.image) if args.image else None,
+            evidence_dir=_resolve(args.evidence_dir) if args.evidence_dir else None,
+            console=ui,
+            report=report,
+        )
+    except Exception as exc:  # noqa: BLE001 - a record that cannot be read is an error
+        if args.json:
+            print(json.dumps({"verdict": "error", "exit_code": EXIT_ERROR,
+                              "message": f"{type(exc).__name__}: {str(exc)[:200]}"}))
+        raise
+    if args.json:
+        print(json.dumps(report, indent=2, sort_keys=True, default=str))
+    return code
 
 
 # ---------------------------------------------------------------------------
@@ -452,15 +504,21 @@ def cmd_tamper_demo(args: argparse.Namespace) -> int:
         "original": "untouched original",
     }
     meanings = {0: "VERIFIED", 2: "REJECTED (hash mismatch)", 3: "REJECTED (not anchored)",
-                4: "REJECTED (anchor mismatch)", 1: "ERROR"}
+                4: "REJECTED (anchor mismatch)", 6: "INCONCLUSIVE (check could not run)",
+                1: "ERROR"}
     for mode, code in results:
         ui.out(f"  {labels.get(mode, mode)}  exit {code}  {meanings.get(code, '')}")
     ui.out()
     ui.info("caught offline by the hash; caught on-chain by the anchor")
+    ui.info(
+        "note: an anchor shows a hash was registered at a time; it does not show "
+        "the underlying claim is true"
+    )
 
-    # The demo itself succeeded as long as every forgery was rejected.
+    # The demo itself succeeded as long as every forgery was positively
+    # rejected. An inconclusive or error result is not a rejection.
     forgeries = [code for mode, code in results if mode != "original"]
-    return EXIT_OK if all(code != 0 for code in forgeries) else EXIT_ERROR
+    return EXIT_OK if all(code in (2, 3, 4) for code in forgeries) else EXIT_ERROR
 
 
 # ---------------------------------------------------------------------------
@@ -481,8 +539,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     version = sys.version_info
     ui.field("version", f"{version.major}.{version.minor}.{version.micro}")
     ui.field("executable", sys.executable)
-    if version < (3, 9):
-        problems.append(f"Python 3.9+ required, found {version.major}.{version.minor}")
+    if version < (3, 10):
+        problems.append(f"Python 3.10+ required, found {version.major}.{version.minor}")
 
     # -- dependencies ------------------------------------------------------
     ui.step("Dependencies")
@@ -530,7 +588,20 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             ui.fail(f"{filename}  only {path.stat().st_size} bytes (git-lfs pointer?)")
             problems.append(f"delete {path} and re-run scripts/fetch_models.py")
         else:
-            ui.ok(f"{filename}  {path.stat().st_size / 1e6:.1f} MB")
+            import hashlib
+
+            try:
+                from .vision.face_detector import MODEL_SHA256
+
+                expected = MODEL_SHA256.get(filename, "")
+            except ImportError:
+                expected = ""
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            if expected and actual != expected:
+                ui.fail(f"{filename}  checksum does NOT match the pinned OpenCV Zoo value")
+                problems.append(f"delete {path} and re-run scripts/fetch_models.py")
+            else:
+                ui.ok(f"{filename}  {path.stat().st_size / 1e6:.1f} MB  sha256 verified")
 
     # -- configuration -----------------------------------------------------
     ui.step("Configuration")
@@ -545,9 +616,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     ui.field("SERPAPI_KEY", _mask(settings.serpapi_key))
     ui.field("TINEYE_API_KEY", _mask(settings.tineye_api_key))
     ui.field("publish provider", settings.publish_provider)
+    if settings.publish_provider not in ("none", ""):
+        ui.warn(
+            "PUBLISH_PROVIDER uploads the query image to a PUBLIC host - only when "
+            "--consent-public-upload is passed"
+        )
     ui.field("IMGBB_API_KEY", _mask(settings.imgbb_api_key))
     ui.field("chain", f"{settings.chain_name} (id {settings.chain_id})")
-    ui.field("RPC_URL", settings.rpc_url or "not set")
+    from .blockchain.client import _redact_url
+
+    ui.field("RPC_URL", _redact_url(settings.rpc_url) if settings.rpc_url else "not set")
     ui.field("CONTRACT_ADDRESS", settings.contract_address or "not set")
     ui.field("PRIVATE_KEY", _mask(settings.private_key, reveal_tail=False))
     ui.field("cosine threshold", str(settings.face_cosine_threshold))
@@ -576,7 +654,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     else:
         ui.step("Network")
         try:
-            from .blockchain.client import ChainError, EvmChainClient
+            from .blockchain.client import EvmChainClient
 
             client = EvmChainClient(settings, require_signer=bool(settings.private_key))
             ui.ok(f"connected to {settings.rpc_url}")
@@ -597,13 +675,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 ui.warn("PRIVATE_KEY not set - reads will work, anchoring will not")
             if client.contract is not None:
                 total = client.contract.functions.totalRecords().call()
-                ui.ok(f"contract reachable, {total} record(s) registered")
+                ui.ok(
+                    f"contract reachable, registry interface v{client.check_compatibility()}, "
+                    f"{total} record(s) registered"
+                )
             else:
-                ui.warn("CONTRACT_ADDRESS not set - run 'deploy' first")
+                ui.warn("CONTRACT_ADDRESS not set - see README > Manual deployment")
                 warnings.append("contract not deployed")
         except Exception as exc:  # noqa: BLE001 - doctor reports, never raises
-            ui.fail(f"chain check failed: {exc}")
-            problems.append(str(exc))
+            ui.fail(f"chain check failed: {type(exc).__name__}: {str(exc)[:240]}")
+            problems.append(f"chain check failed: {type(exc).__name__}")
 
     # -- summary -----------------------------------------------------------
     # Deduplicated while preserving order: two missing models produce the same
@@ -660,12 +741,20 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     ui.step("Compiling")
     artifact = compile_contract(force=args.force_compile)
     ui.ok(f"solc {artifact['solcVersion']}, {len(artifact['bytecode']) // 2} bytes of bytecode")
+    ui.field("registry interface", f"v{artifact.get('registryVersion', '?')}")
     ui.field("artifact", str(ARTIFACT_PATH))
     ui.field("source sha256", artifact.get("sourceSha256", ""))
 
     if args.compile_only:
         ui.ok("compile-only: not deploying")
         return EXIT_OK
+
+    if not args.yes:
+        ui.fail("a real deployment spends gas and creates a PERMANENT public contract")
+        ui.info("nothing was deployed. Re-run with --yes if you really intend this,")
+        ui.info("using a burner wallet (never one holding real assets).")
+        ui.info("See README > Manual deployment for the full procedure.")
+        return EXIT_ERROR
 
     if settings.contract_address and not args.force:
         ui.warn(f"CONTRACT_ADDRESS is already set to {settings.contract_address}")
@@ -678,6 +767,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     settings.contract_address = ""
     client = EvmChainClient(settings, require_signer=True)
     ui.field("network", f"{settings.chain_name} (id {settings.chain_id})")
+    assert client.account is not None  # require_signer=True guarantees it
     ui.field("deployer", client.account.address)
     balance = client.balance_eth()
     ui.field("balance", f"{balance:.6f} ETH")
@@ -706,6 +796,32 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_purge_evidence(args: argparse.Namespace) -> int:
+    """List - and with --yes delete - old local evidence bundles."""
+    from .privacy import purge_evidence
+
+    settings = _settings(args)
+    ui = _console(args)
+    days = args.older_than_days
+    if days is None:
+        days = settings.evidence_retention_days
+    if not days:
+        ui.fail("no age given: pass --older-than-days N (or set EVIDENCE_RETENTION_DAYS)")
+        return EXIT_ERROR
+    ui.header("Purge local evidence")
+    ui.field("directory", str(settings.evidence_dir))
+    targets = purge_evidence(settings.evidence_dir, older_than_days=days, dry_run=not args.yes)
+    for path in targets:
+        ui.info(("deleted " if args.yes else "would delete ") + path.name)
+    if not targets:
+        ui.ok(f"nothing older than {days} day(s)")
+    elif not args.yes:
+        ui.warn("dry run: re-run with --yes to delete. Verification records in output/ are never touched.")
+    else:
+        ui.ok(f"{len(targets)} bundle(s) deleted")
+    return EXIT_OK
+
+
 # ---------------------------------------------------------------------------
 # parser
 # ---------------------------------------------------------------------------
@@ -715,9 +831,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m src.main",
         description=(
-            "Face ID + blockchain verification: match a face against a real "
-            "social-media post found by reverse-image search, then anchor the "
-            "result on-chain."
+            "Image-provenance verification: find where an image was published "
+            "via reverse-image search, confirm candidates locally (face "
+            "similarity and/or perceptual hash), and anchor a hash of the "
+            "evidence record on-chain. This is not an identity-recognition tool."
         ),
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -784,6 +901,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="permit the stub engine / fixture provider - NOT a real verification",
     )
+    register.add_argument(
+        "--consent-external-search",
+        action="store_true",
+        help="allow sending the image (or a public URL to it) to the search provider",
+    )
+    register.add_argument(
+        "--consent-public-upload",
+        action="store_true",
+        help="allow uploading the image to a PUBLIC third-party host (needed when "
+        "the provider takes a URL and PUBLISH_PROVIDER is set)",
+    )
+    register.add_argument(
+        "--require-face-match",
+        action="store_true",
+        help="only register a candidate that passes the FACE test (excludes "
+        "pHash-only image-derivative matches)",
+    )
+    register.add_argument(
+        "--minimal-evidence",
+        action="store_true",
+        help="do not save face crops, the matched image bytes or the comparison image",
+    )
     register.add_argument("--output", default="", metavar="PATH", help="where to write the record")
     register.set_defaults(func=cmd_register)
 
@@ -831,6 +970,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="permit the fixture provider - NOT a real search",
     )
     search.add_argument(
+        "--consent-external-search",
+        action="store_true",
+        help="allow sending the image (or a public URL to it) to the search provider",
+    )
+    search.add_argument(
+        "--consent-public-upload",
+        action="store_true",
+        help="allow uploading the image to a PUBLIC third-party host (needed when "
+        "the provider takes a URL and PUBLISH_PROVIDER is set)",
+    )
+    search.add_argument(
         "--save-raw",
         default="",
         metavar="PATH",
@@ -850,6 +1000,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     verify.add_argument(
         "--image", default="", metavar="PATH", help="also check the record describes this file"
+    )
+    verify.add_argument(
+        "--evidence-dir",
+        default="",
+        metavar="DIR",
+        help="also check this evidence bundle against its manifest and the record",
+    )
+    verify.add_argument(
+        "--json",
+        action="store_true",
+        help="print a machine-readable result on stdout (progress goes to stderr)",
     )
     verify.set_defaults(func=cmd_verify)
 
@@ -902,12 +1063,32 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--offline", action="store_true", help="skip all network checks")
     doctor.set_defaults(func=cmd_doctor)
 
+    # -- purge-evidence ----------------------------------------------------
+    purge = subparsers.add_parser(
+        "purge-evidence",
+        parents=[common],
+        help="delete old local evidence bundles",
+        description=(
+            "Evidence bundles can hold face crops and downloaded images. This "
+            "lists (dry run) or deletes (--yes) bundles older than N days. "
+            "Records in output/ are never touched."
+        ),
+    )
+    purge.add_argument("--older-than-days", type=float, default=None, metavar="N")
+    purge.add_argument("--yes", action="store_true", help="actually delete (default: dry run)")
+    purge.set_defaults(func=cmd_purge_evidence)
+
     # -- deploy ------------------------------------------------------------
     deploy = subparsers.add_parser(
         "deploy",
         parents=[common, chain_opts],
         help="compile and deploy the registry contract",
         description="Compile VerificationRegistry.sol and deploy it to the configured chain.",
+    )
+    deploy.add_argument(
+        "--yes",
+        action="store_true",
+        help="REQUIRED to deploy: confirms you accept spending gas on a public chain",
     )
     deploy.add_argument("--save", action="store_true", help="write CONTRACT_ADDRESS into .env")
     deploy.add_argument("--force", action="store_true", help="deploy even if one is already set")
@@ -943,6 +1124,11 @@ def main(argv: list[str] | None = None) -> int:
         name = type(exc).__name__
         known = {
             "ChainError",
+            "IncompatibleContractError",
+            "ConsentError",
+            "RecordError",
+            "DownloadError",
+            "UnsafeDownloadError",
             "SearchError",
             "PublishError",
             "ModelMissingError",

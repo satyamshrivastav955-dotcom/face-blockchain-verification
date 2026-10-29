@@ -74,7 +74,7 @@ class Settings:
     fixture_path: str = ""
 
     # publishing
-    publish_provider: str = "catbox"
+    publish_provider: str = "none"
     imgbb_api_key: str = ""
 
     # chain
@@ -90,7 +90,15 @@ class Settings:
     phash_max_distance: int = 12
     max_candidates: int = 25
 
+    # local evidence retention: 0 = keep forever (purge manually with
+    # 'purge-evidence'); N > 0 = 'purge-evidence' defaults to N days
+    evidence_retention_days: int = 0
+
     # paths
+    models_path: Path | None = None
+    """Optional override for the model directory (used by the local web app so
+    per-job temporary roots can still find the shared model weights)."""
+
     root: Path = PROJECT_ROOT
     """Base directory for models/, output/ and evidence/.
 
@@ -101,7 +109,7 @@ class Settings:
 
     @property
     def models_dir(self) -> Path:
-        return self.root / "models"
+        return self.models_path or (self.root / "models")
 
     @property
     def output_dir(self) -> Path:
@@ -116,6 +124,30 @@ class Settings:
 
     def address_url(self, address: str) -> str:
         return f"{self.explorer_base.rstrip('/')}/address/{address}"
+
+    def validate(self) -> None:
+        """Reject nonsensical numeric settings with an actionable message."""
+        import math
+
+        if not (math.isfinite(self.face_cosine_threshold) and -1.0 < self.face_cosine_threshold <= 1.0):
+            raise ConfigError(
+                f"FACE_COSINE_THRESHOLD must be in (-1, 1], got {self.face_cosine_threshold}"
+            )
+        if not 0 <= self.phash_max_distance <= 64:
+            raise ConfigError(
+                f"PHASH_MAX_DISTANCE must be between 0 and 64, got {self.phash_max_distance}"
+            )
+        if not 1 <= self.max_candidates <= 100:
+            raise ConfigError(f"MAX_CANDIDATES must be 1-100, got {self.max_candidates}")
+        if self.chain_id <= 0:
+            raise ConfigError(f"CHAIN_ID must be positive, got {self.chain_id}")
+        if self.evidence_retention_days < 0:
+            raise ConfigError("EVIDENCE_RETENTION_DAYS must be >= 0")
+        if self.contract_address:
+            import re
+
+            if not re.fullmatch(r"0x[0-9a-fA-F]{40}", self.contract_address):
+                raise ConfigError("CONTRACT_ADDRESS must be 0x followed by 40 hex digits")
 
     def require(self, *fields: str) -> None:
         """Fail fast with an actionable message if a needed field is unset."""
@@ -148,7 +180,7 @@ def load_settings(dotenv_path: str | Path | None = None) -> Settings:
         serpapi_key=_env("SERPAPI_KEY"),
         tineye_api_key=_env("TINEYE_API_KEY"),
         fixture_path=_env("FIXTURE_PATH"),
-        publish_provider=_env("PUBLISH_PROVIDER", "catbox").lower(),
+        publish_provider=_env("PUBLISH_PROVIDER", "none").lower(),
         imgbb_api_key=_env("IMGBB_API_KEY"),
         chain_name=_env("CHAIN_NAME", "base-sepolia"),
         chain_id=_env_int("CHAIN_ID", 84532),
@@ -159,5 +191,6 @@ def load_settings(dotenv_path: str | Path | None = None) -> Settings:
         face_cosine_threshold=_env_float("FACE_COSINE_THRESHOLD", 0.363),
         phash_max_distance=_env_int("PHASH_MAX_DISTANCE", 12),
         max_candidates=_env_int("MAX_CANDIDATES", 25),
+        evidence_retention_days=_env_int("EVIDENCE_RETENTION_DAYS", 0),
         root=Path(_env("PROJECT_DIR")).expanduser().resolve() if _env("PROJECT_DIR") else PROJECT_ROOT,
     )

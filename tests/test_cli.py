@@ -30,6 +30,7 @@ class TestParser:
             "tamper-demo",
             "doctor",
             "deploy",
+            "purge-evidence",
         }
 
     def test_register_requires_an_image(self, capsys):
@@ -280,7 +281,7 @@ class TestEndToEndThroughTheCli:
         assert record.exists()
 
         out = capsys.readouterr().out
-        assert "CONFIRMED" in out
+        assert "FACE MATCH" in out
         assert "cosine" in out  # the score table was printed
 
         common = ["--dry-run", "--ascii", "--env", str(project["env"])]
