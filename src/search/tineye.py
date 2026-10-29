@@ -62,19 +62,19 @@ class TinEyeProvider(ReverseSearchProvider):
                     timeout=self.timeout,
                 )
         except Exception as exc:
-            raise SearchError(f"TinEye request failed: {exc}") from exc
+            raise SearchError(f"TinEye request failed ({type(exc).__name__}); check connectivity") from exc
 
         if resp.status_code in (401, 403):
             raise SearchError(f"TinEye rejected the key (HTTP {resp.status_code})")
         if resp.status_code == 429:
             raise SearchError("TinEye quota exhausted (HTTP 429)")
         if resp.status_code != 200:
-            raise SearchError(f"TinEye returned HTTP {resp.status_code}: {resp.text[:300]}")
+            raise SearchError(f"TinEye returned HTTP {resp.status_code}: {resp.text[:120]}")
 
         try:
             data = resp.json()
         except ValueError as exc:
-            raise SearchError(f"TinEye response was not JSON: {resp.text[:300]}") from exc
+            raise SearchError(f"TinEye response was not JSON: {resp.text[:120]}") from exc
 
         # TinEye reports application-level failures inside a 200 response.
         status = str(data.get("status", "")).lower() if isinstance(data, dict) else ""
@@ -99,7 +99,7 @@ class TinEyeProvider(ReverseSearchProvider):
             return out
 
         results = data.get("results")
-        matches = []
+        matches: list = []
         if isinstance(results, dict):
             matches = results.get("matches") or []
         elif isinstance(results, list):

@@ -7,11 +7,13 @@ module handles that and nothing else.
 
 PRIVACY NOTE
 ============
-This step puts the query image on a third-party host. Only ever run it on an
-image you have the right to publish - your own photo, or an openly licensed
-one. If that is not acceptable for a given image, set ``PUBLISH_PROVIDER=none``
-and use the TinEye backend, which uploads directly to the search API instead,
-or pass ``--image-url`` for a host you control.
+This step puts the query image on a third-party PUBLIC host. It runs only when
+the caller passes explicit consent (``--consent-public-upload``) and a
+PUBLISH_PROVIDER other than ``none`` is configured; ``none`` is the default.
+Only use it on an image you have the right to publish. No retention or deletion
+promise is made here: that is up to the host. Alternatives: pass ``--image-url``
+for a host you control, or use the TinEye backend, which receives the image
+directly instead of a public URL.
 """
 
 from __future__ import annotations
@@ -40,17 +42,17 @@ def _publish_uguu(path: Path) -> str:
             timeout=TIMEOUT,
         )
     if resp.status_code != 200:
-        raise PublishError(f"uguu returned HTTP {resp.status_code}: {resp.text[:200]}")
+        raise PublishError(f"uguu returned HTTP {resp.status_code}: {resp.text[:80]}")
     try:
         data = resp.json()
     except Exception as exc:
         raise PublishError("uguu response was not JSON") from exc
     files = data.get("files")
     if not files or not isinstance(files, list):
-        raise PublishError(f"uguu returned no files in response: {data}")
+        raise PublishError("uguu returned no files in its response")
     url = files[0].get("url")
     if not url:
-        raise PublishError(f"uguu file entry had no url: {files[0]}")
+        raise PublishError("uguu file entry had no url")
     return str(url)
 
 
@@ -84,21 +86,25 @@ def _publish_imgbb(path: Path, api_key: str) -> str:
     if not api_key:
         raise PublishError("IMGBB_API_KEY is not set")
     payload = base64.b64encode(path.read_bytes())
-    resp = requests.post(
-        "https://api.imgbb.com/1/upload",
-        params={"key": api_key},
-        data={"image": payload},
-        timeout=TIMEOUT,
-    )
+    try:
+        resp = requests.post(
+            "https://api.imgbb.com/1/upload",
+            params={"key": api_key},
+            data={"image": payload},
+            timeout=TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        # The exception text can contain the request URL, which carries the key.
+        raise PublishError(f"imgbb request failed ({type(exc).__name__})") from exc
     if resp.status_code != 200:
-        raise PublishError(f"imgbb returned HTTP {resp.status_code}: {resp.text[:200]}")
+        raise PublishError(f"imgbb returned HTTP {resp.status_code}: {resp.text[:80]}")
     try:
         data = resp.json()
     except ValueError as exc:
         raise PublishError("imgbb response was not JSON") from exc
     url = ((data.get("data") or {}).get("url")) if isinstance(data, dict) else None
     if not url:
-        raise PublishError(f"imgbb response had no image URL: {str(data)[:200]}")
+        raise PublishError("imgbb response had no image URL")
     return str(url)
 
 

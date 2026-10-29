@@ -77,7 +77,7 @@ class SerpApiLensProvider(ReverseSearchProvider):
         try:
             resp = requests.get(ENDPOINT, params=params, timeout=self.timeout)
         except Exception as exc:
-            raise SearchError(f"SerpApi request failed: {exc}") from exc
+            raise SearchError(f"SerpApi request failed ({type(exc).__name__}); check connectivity") from exc
 
         if resp.status_code == 401:
             raise SearchError("SerpApi rejected the key (HTTP 401)")
@@ -87,12 +87,12 @@ class SerpApiLensProvider(ReverseSearchProvider):
                 "tineye, or top up the account."
             )
         if resp.status_code != 200:
-            raise SearchError(f"SerpApi returned HTTP {resp.status_code}: {resp.text[:300]}")
+            raise SearchError(f"SerpApi returned HTTP {resp.status_code}: {resp.text[:120]}")
 
         try:
             data = resp.json()
         except ValueError as exc:
-            raise SearchError(f"SerpApi response was not JSON: {resp.text[:300]}") from exc
+            raise SearchError(f"SerpApi response was not JSON: {resp.text[:120]}") from exc
 
         if isinstance(data, dict) and data.get("error"):
             raise SearchError(f"SerpApi error: {data['error']}")
