@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Any, Protocol, Sequence
 
 import cv2
 import numpy as np
@@ -40,10 +40,21 @@ __all__ = [
     "embedding_fingerprint",
     "DET_MODEL_FILE",
     "REC_MODEL_FILE",
+    "MODEL_SHA256",
+    "MODEL_SIZE",
 ]
 
 DET_MODEL_FILE = "face_detection_yunet_2023mar.onnx"
 REC_MODEL_FILE = "face_recognition_sface_2021dec.onnx"
+
+# SHA-256 and size of the official OpenCV Zoo weights. Taken from the git-lfs
+# pointer files in https://github.com/opencv/opencv_zoo (branch main) and
+# confirmed equal to the files this project downloads; not guessed.
+MODEL_SHA256 = {
+    DET_MODEL_FILE: "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+    REC_MODEL_FILE: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+}
+MODEL_SIZE = {DET_MODEL_FILE: 232589, REC_MODEL_FILE: 38696353}
 
 
 class ModelMissingError(RuntimeError):
@@ -88,10 +99,13 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     b = np.asarray(b, dtype=np.float64).ravel()
     if a.size != b.size:
         raise ValueError(f"embedding size mismatch: {a.size} vs {b.size}")
+    if not (np.isfinite(a).all() and np.isfinite(b).all()):
+        raise ValueError("embedding contains NaN or infinity")
     na, nb = np.linalg.norm(a), np.linalg.norm(b)
     if na == 0.0 or nb == 0.0:
         return 0.0
-    return float(np.dot(a, b) / (na * nb))
+    # Clamp: rounding can push |cosine| a hair past 1.
+    return float(max(-1.0, min(1.0, np.dot(a, b) / (na * nb))))
 
 
 def embedding_fingerprint(embedding: np.ndarray) -> str:
@@ -137,8 +151,8 @@ class OpenCVFaceEngine:
         self.nms_threshold = nms_threshold
         self.top_k = top_k
         self.embedding_dim = 128
-        self._detector = None
-        self._recognizer = None
+        self._detector: Any = None
+        self._recognizer: Any = None
 
     # -- model loading -----------------------------------------------------
 
@@ -182,7 +196,14 @@ class OpenCVFaceEngine:
         return self._recognizer
 
     def model_versions(self) -> dict[str, str]:
-        return {"detector": DET_MODEL_FILE, "recognizer": REC_MODEL_FILE}
+        """Model file names plus the SHA-256 of the files actually loaded."""
+        import hashlib
+
+        out = {"detector": DET_MODEL_FILE, "recognizer": REC_MODEL_FILE}
+        for key, name in (("detector_sha256", DET_MODEL_FILE), ("recognizer_sha256", REC_MODEL_FILE)):
+            path = self.models_dir / name
+            out[key] = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
+        return out
 
     # -- inference ---------------------------------------------------------
 
@@ -305,7 +326,12 @@ def best_similarity(
     for face in faces:
         if face.embedding is None:
             continue
-        score = cosine_similarity(query, face.embedding)
+        try:
+            score = cosine_similarity(query, face.embedding)
+        except ValueError:
+            continue  # unusable embedding (wrong size / non-finite): cannot match
+        if score != score:
+            continue
         if score > best_score:
             best_score, best_face = score, face
     return (best_score if best_face is not None else 0.0), best_face

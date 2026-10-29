@@ -16,6 +16,8 @@ from .face_detector import (
 from .preprocess import (
     DownloadError,
     ImageError,
+    UnsafeDownloadError,
+    decode_image_safely,
     encode_png,
     fetch_image,
     hamming,
@@ -33,6 +35,8 @@ __all__ = [
     "Face",
     "FaceEngine",
     "ImageError",
+    "UnsafeDownloadError",
+    "decode_image_safely",
     "ModelMissingError",
     "NoFaceError",
     "OpenCVFaceEngine",

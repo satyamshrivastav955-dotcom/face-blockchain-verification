@@ -9,7 +9,6 @@ selection prefers a social-media page - all without any network.
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
 from src.config import SOCIAL_DOMAINS
@@ -38,6 +37,7 @@ def run(candidates, tmp_path, *, cosine=0.363, distance=12, **kwargs):
         cosine_threshold=cosine,
         phash_max_distance=distance,
         social_domains=SOCIAL_DOMAINS,
+        allow_local_files=True,  # offline fixtures only; refused by default
         **kwargs,
     )
 

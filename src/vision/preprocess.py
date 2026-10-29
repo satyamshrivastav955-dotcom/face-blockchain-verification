@@ -4,9 +4,12 @@ Image IO, perceptual hashing, safe remote fetching, and demo rendering.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import struct
+import threading
+import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 import cv2
 import numpy as np
@@ -14,6 +17,8 @@ import numpy as np
 __all__ = [
     "ImageError",
     "DownloadError",
+    "UnsafeDownloadError",
+    "decode_image_safely",
     "load_image",
     "encode_png",
     "image_info",
@@ -26,11 +31,19 @@ __all__ = [
 
 # Guard rails for fetching third-party images we did not choose.
 MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
-DOWNLOAD_TIMEOUT = 20
+DOWNLOAD_TIMEOUT = 20  # per request; a total deadline is enforced separately
+TOTAL_DEADLINE_SECONDS = 45
+MAX_REDIRECTS = 3
+# Decoded-image bounds: a small compressed file can expand to gigabytes.
+MAX_IMAGE_DIMENSION = 16384
+MAX_IMAGE_PIXELS = 50_000_000
+MAX_CONCURRENT_FETCHES = 2
 USER_AGENT = (
     "face-blockchain-verification/1.0 (academic image-provenance research; "
     "contact via repository)"
 )
+
+_FETCH_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_FETCHES)
 
 
 class ImageError(RuntimeError):
@@ -41,29 +54,115 @@ class DownloadError(RuntimeError):
     """A remote image could not be retrieved."""
 
 
-def load_image(path: str | Path) -> np.ndarray:
-    """Read an image from disk as BGR.
+class UnsafeDownloadError(DownloadError):
+    """The URL (or a redirect target) was refused by the SSRF guard."""
 
-    Uses ``np.fromfile`` + ``cv2.imdecode`` rather than ``cv2.imread`` because
-    ``cv2.imread`` silently returns None for paths containing non-ASCII
-    characters on Windows - it passes the path to the C++ layer as a narrow
-    byte string. Reading the bytes in Python first sidesteps that entirely.
+
+def _sniff_dimensions(data: bytes) -> tuple[int, int] | None:
+    """Read (width, height) from a PNG/JPEG/GIF/BMP/WebP header without decoding.
+
+    Returns ``None`` for an unrecognised format. Used to reject decompression
+    bombs *before* handing bytes to the decoder.
+    """
+    if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) >= 24:
+        return struct.unpack(">II", data[16:24])
+    if data[:6] in (b"GIF87a", b"GIF89a") and len(data) >= 10:
+        return struct.unpack("<HH", data[6:10])
+    if data[:2] == b"BM" and len(data) >= 26:
+        w, h = struct.unpack("<ii", data[18:26])
+        return abs(w), abs(h)
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP" and len(data) >= 30:
+        kind = data[12:16]
+        if kind == b"VP8X":
+            return (
+                1 + int.from_bytes(data[24:27], "little"),
+                1 + int.from_bytes(data[27:30], "little"),
+            )
+        if kind == b"VP8 " and data[23:26] == b"\x9d\x01\x2a":
+            w, h = struct.unpack("<HH", data[26:30])
+            return w & 0x3FFF, h & 0x3FFF
+        if kind == b"VP8L" and data[20] == 0x2F:
+            bits = int.from_bytes(data[21:25], "little")
+            return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+        return None
+    if data[:2] == b"\xff\xd8":
+        i = 2
+        while i + 9 < len(data):
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            marker = data[i + 1]
+            if marker == 0xFF:
+                i += 1
+                continue
+            if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+                i += 2
+                continue
+            length = struct.unpack(">H", data[i + 2 : i + 4])[0]
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                h, w = struct.unpack(">HH", data[i + 5 : i + 9])
+                return w, h
+            i += 2 + length
+    return None
+
+
+def decode_image_safely(raw: bytes, *, label: str = "image") -> np.ndarray:
+    """Decode *raw* to a validated BGR ``uint8`` array, or raise :class:`ImageError`.
+
+    Checks, in order: non-empty, a recognised format, header dimensions within
+    :data:`MAX_IMAGE_DIMENSION` / :data:`MAX_IMAGE_PIXELS` (before any pixel
+    allocation), successful decode, and the decoded array's dtype and shape.
+    """
+    if not raw:
+        raise ImageError(f"{label} is empty")
+    dims = _sniff_dimensions(raw)
+    if dims is None:
+        raise ImageError(
+            f"{label} is not a supported image format (JPEG, PNG, WebP, GIF, BMP)"
+        )
+    width, height = dims
+    if width <= 0 or height <= 0:
+        raise ImageError(f"{label} reports invalid dimensions")
+    if max(width, height) > MAX_IMAGE_DIMENSION or width * height > MAX_IMAGE_PIXELS:
+        raise ImageError(
+            f"{label} is {width}x{height}, above the limit of "
+            f"{MAX_IMAGE_DIMENSION}px per side / {MAX_IMAGE_PIXELS // 1_000_000} MP"
+        )
+    try:
+        img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+    except cv2.error as exc:
+        raise ImageError(f"{label} could not be decoded") from exc
+    if (
+        img is None
+        or img.dtype != np.uint8
+        or img.ndim != 3
+        or img.shape[2] != 3
+        or img.shape[0] == 0
+        or img.shape[1] == 0
+    ):
+        raise ImageError(f"{label} did not decode as a valid image (corrupt?)")
+    return img
+
+
+def load_image(path: str | Path) -> np.ndarray:
+    """Read an image from disk as BGR, with size limits.
+
+    Reads bytes in Python then decodes, rather than ``cv2.imread``, because
+    ``cv2.imread`` silently returns None for non-ASCII paths on Windows.
     """
     p = Path(path)
     if not p.exists():
         raise ImageError(f"no such image: {p}")
-    if p.stat().st_size == 0:
+    size = p.stat().st_size
+    if size == 0:
         raise ImageError(f"image is empty: {p}")
+    if size > MAX_DOWNLOAD_BYTES * 2:
+        raise ImageError(f"image file is too large: {p}")
     try:
-        buf = np.fromfile(str(p), dtype=np.uint8)
-        img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-    except Exception as exc:  # pragma: no cover - defensive
-        raise ImageError(f"could not read {p}: {exc}") from exc
-    if img is None:
-        raise ImageError(
-            f"could not decode {p} as an image (corrupt, or an unsupported format)"
-        )
-    return img
+        raw = p.read_bytes()
+    except OSError as exc:
+        raise ImageError(f"could not read {p}: {exc.strerror or 'I/O error'}") from exc
+    return decode_image_safely(raw, label=p.name)
 
 
 def encode_png(img: np.ndarray) -> bytes:
@@ -121,57 +220,105 @@ def fetch_image(url: str, session: Any = None) -> tuple[bytes, np.ndarray]:
     """Download an image, defensively, and decode it.
 
     Returns ``(raw_bytes, bgr_array)``. The raw bytes are returned too so the
-    exact artefact can be hashed and archived as evidence - re-encoding first
-    would change the hash and weaken the audit trail.
+    exact artefact can be hashed and archived as evidence.
 
-    Third-party URLs are hostile input, so we cap the response size, cap the
-    time, require an image content type when one is offered, and never follow
-    a non-HTTP scheme.
+    Third-party URLs are hostile input. Every hop (the first URL and each
+    redirect target) is validated by :mod:`src.vision.netguard`; redirects are
+    followed manually, at most :data:`MAX_REDIRECTS` times; size, time and
+    content type are bounded; the decoded image is bounded too. When no
+    *session* is given, a connection-pinned session is used so the connect goes
+    to the address that was validated.
     """
-    import requests
+    from .netguard import UnsafeURLError, resolve_public_addresses, validate_url
 
-    if not url.lower().startswith(("http://", "https://")):
-        raise DownloadError(f"refusing non-HTTP URL: {url[:120]}")
+    owns_session = session is None
+    if owns_session:
+        from .netguard import make_guarded_session
 
-    sess = session or requests
+        session = make_guarded_session()
+
+    deadline = time.monotonic() + TOTAL_DEADLINE_SECONDS
+    seen: set[str] = set()
+    current = url
+    raw = b""
     try:
-        resp = sess.get(
-            url,
-            timeout=DOWNLOAD_TIMEOUT,
-            stream=True,
-            headers={"User-Agent": USER_AGENT},
+        with _FETCH_SLOTS:
+            for _hop in range(MAX_REDIRECTS + 1):
+                try:
+                    parsed = validate_url(current)
+                    resolve_public_addresses(parsed.host, parsed.port)
+                except UnsafeURLError as exc:
+                    raise UnsafeDownloadError(f"refused URL: {exc}") from exc
+                if current in seen:
+                    raise DownloadError("redirect loop")
+                seen.add(current)
+                if time.monotonic() > deadline:
+                    raise DownloadError("download deadline exceeded")
+
+                try:
+                    resp = session.get(
+                        current,
+                        timeout=DOWNLOAD_TIMEOUT,
+                        stream=True,
+                        allow_redirects=False,
+                        headers={"User-Agent": USER_AGENT},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    raise DownloadError(
+                        f"request to {parsed.host} failed ({type(exc).__name__})"
+                    ) from exc
+
+                with resp:
+                    status = resp.status_code
+                    if status in (301, 302, 303, 307, 308):
+                        location = resp.headers.get("Location") or ""
+                        if not location:
+                            raise DownloadError(f"HTTP {status} without Location")
+                        current = urljoin(current, location)
+                        continue
+                    if status != 200:
+                        raise DownloadError(f"HTTP {status}")
+                    raw = _read_body(resp, deadline)
+                break
+            else:
+                raise DownloadError(f"more than {MAX_REDIRECTS} redirects")
+    finally:
+        if owns_session:
+            session.close()
+
+    try:
+        img = decode_image_safely(raw, label="downloaded image")
+    except ImageError as exc:
+        raise DownloadError(str(exc)) from exc
+    return raw, img
+
+
+def _read_body(resp: Any, deadline: float) -> bytes:
+    ctype = (resp.headers.get("Content-Type") or "").lower()
+    if ctype and not ctype.startswith(("image/", "application/octet-stream")):
+        raise DownloadError(f"not an image (Content-Type: {ctype[:60]})")
+    declared = resp.headers.get("Content-Length")
+    if declared and declared.isdigit() and int(declared) > MAX_DOWNLOAD_BYTES:
+        raise DownloadError(
+            f"image exceeds {MAX_DOWNLOAD_BYTES // (1024 * 1024)} MiB limit"
         )
-    except Exception as exc:
-        raise DownloadError(f"request failed: {exc}") from exc
-
-    with resp:
-        if resp.status_code != 200:
-            raise DownloadError(f"HTTP {resp.status_code}")
-
-        ctype = (resp.headers.get("Content-Type") or "").lower()
-        if ctype and not ctype.startswith(("image/", "application/octet-stream")):
-            raise DownloadError(f"not an image (Content-Type: {ctype})")
-
-        chunks: list[bytes] = []
-        total = 0
-        for chunk in resp.iter_content(64 * 1024):
-            if not chunk:
-                continue
-            total += len(chunk)
-            if total > MAX_DOWNLOAD_BYTES:
-                raise DownloadError(
-                    f"image exceeds {MAX_DOWNLOAD_BYTES // (1024 * 1024)} MiB limit"
-                )
-            chunks.append(chunk)
-
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in resp.iter_content(64 * 1024):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > MAX_DOWNLOAD_BYTES:
+            raise DownloadError(
+                f"image exceeds {MAX_DOWNLOAD_BYTES // (1024 * 1024)} MiB limit"
+            )
+        if time.monotonic() > deadline:
+            raise DownloadError("download deadline exceeded")
+        chunks.append(chunk)
     raw = b"".join(chunks)
     if not raw:
         raise DownloadError("empty response body")
-
-    img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
-    if img is None:
-        raise DownloadError("response body did not decode as an image")
-    return raw, img
+    return raw
 
 
 # ---------------------------------------------------------------------------
@@ -211,8 +358,8 @@ def _elide(text: str, max_px: int) -> str:
 
 
 def side_by_side(
-    query_face: np.ndarray,
-    candidate_face: np.ndarray,
+    query_face: np.ndarray | None,
+    candidate_face: np.ndarray | None,
     *,
     similarity: str,
     threshold: str,
@@ -220,13 +367,15 @@ def side_by_side(
     matched_url: str,
     accepted: bool,
     tile: int = 224,
+    verdict: str | None = None,
+    candidate_caption: str = "candidate face (from the post)",
 ) -> np.ndarray:
     """Render the query face beside the matched face, annotated with scores.
 
     This is the single frame that makes the match legible to a human watching
     the recording, instead of asking them to trust a number in a JSON file.
     """
-    def _fit(img: np.ndarray) -> np.ndarray:
+    def _fit(img: np.ndarray | None) -> np.ndarray:
         if img is None or img.size == 0:
             return np.full((tile, tile, 3), 40, dtype=np.uint8)
         return cv2.resize(img, (tile, tile), interpolation=cv2.INTER_AREA)
@@ -241,12 +390,13 @@ def side_by_side(
     canvas[header : header + tile, gap * 2 + tile : gap * 2 + tile * 2] = right
 
     accent = (110, 220, 130) if accepted else (110, 110, 240)
-    verdict = "CONFIRMED MATCH" if accepted else "REJECTED (below threshold)"
+    if verdict is None:
+        verdict = "CONFIRMED MATCH" if accepted else "REJECTED (below threshold)"
 
     _label(canvas, "query face", (gap, 22), (200, 200, 200))
     _label(
         canvas,
-        _elide("candidate face (from the post)", tile),
+        _elide(candidate_caption, tile),
         (gap * 2 + tile, 22),
         (200, 200, 200),
     )
