@@ -5,21 +5,26 @@ CHAIN CHOICE (Base Sepolia)
 ===========================
 Base Sepolia is an OP-Stack Ethereum L2 testnet. It was chosen over Polygon
 Amoy and Ethereum Sepolia for three practical reasons: its faucets are the most
-reliable of the three (a dry faucet on the evening of a deadline is a real
-project risk), block times are ~2s so a demo does not stall waiting for
-confirmation, and BaseScan renders the event log legibly, which matters when the
-transaction has to be shown on camera.
+reliable of the three, block times are ~2s so a demo does not stall waiting for
+confirmation, and BaseScan renders the event log legibly.
 
 Nothing here is Base-specific. It is a standard EVM chain reached over JSON-RPC,
-so pointing ``RPC_URL``, ``CHAIN_ID`` and ``EXPLORER_BASE`` at Amoy, Sepolia or a
-local node is a configuration change, not a code change.
+so pointing ``RPC_URL``, ``CHAIN_ID`` and ``EXPLORER_BASE`` at another EVM chain
+or a local node is a configuration change, not a code change.
 
-WEB3 VERSION COMPATIBILITY
-==========================
-web3.py v7 renamed several things that v6 code depends on - most awkwardly
-``SignedTransaction.rawTransaction`` became ``raw_transaction``, and the PoA
-middleware moved and was renamed. Both are handled below so the project works
-on either major version rather than pinning users to one.
+PRIVACY OF THE SOURCE URL
+=========================
+The registry (interface v2) receives only ``keccak256(url)``, computed here.
+The plaintext URL is never placed in calldata, storage or events. The local
+record still contains the URL, so anyone holding the record can verify it
+against the on-chain commitment. (The commitment is not secret against
+guessing, and it does not prove the URL is authentic - see the README.)
+
+WEB3 VERSION
+============
+Developed and tested against web3.py 7.x (7.16 at the time of writing) using the
+v7 names (``raw_transaction``, ``ExtraDataToPOAMiddleware``). web3.py 6 is no
+longer supported by this client.
 """
 
 from __future__ import annotations
@@ -29,11 +34,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from ..evidence.hashing import sha256_bytes
 from ..config import PROJECT_ROOT, Settings
+from ..evidence.hashing import sha256_bytes
 
 __all__ = [
     "ChainError",
+    "IncompatibleContractError",
+    "REGISTRY_VERSION",
+    "url_commitment",
     "AnchorResult",
     "ChainRecord",
     "ChainClient",
@@ -50,9 +58,37 @@ BUILD_DIR = PROJECT_ROOT / "contracts" / "build"
 ARTIFACT_PATH = BUILD_DIR / f"{CONTRACT_NAME}.json"
 SOLC_VERSION = "0.8.24"
 
+# Interface revision this client speaks. v1 took the plaintext URL as calldata
+# and emitted it in an event; v2 takes only a keccak256 commitment.
+REGISTRY_VERSION = 2
+
 
 class ChainError(RuntimeError):
-    """A blockchain operation failed."""
+    """A blockchain operation failed (or could not be completed)."""
+
+
+class IncompatibleContractError(ChainError):
+    """The configured address does not host a compatible registry (v2)."""
+
+
+def url_commitment(url: str) -> str:
+    """``0x``-prefixed keccak256 of the exact UTF-8 bytes of *url*.
+
+    The single definition shared by the client, the mock and any verifier. The
+    URL is committed byte-for-byte: no normalisation, trimming or case folding,
+    so ``http://a/`` and ``http://a`` are different commitments.
+    """
+    if not isinstance(url, str):
+        raise ChainError("source URL must be a string")
+    try:
+        from eth_utils.crypto import keccak
+    except ImportError as exc:  # pragma: no cover - web3 depends on eth-utils
+        raise ChainError("eth-utils is required to compute URL commitments") from exc
+    try:
+        raw = url.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ChainError("source URL is not valid Unicode text") from exc
+    return "0x" + keccak(raw).hex()
 
 
 @dataclass
@@ -70,16 +106,20 @@ class AnchorResult:
     gas_used: int = 0
     explorer_url: str = ""
     simulated: bool = False
+    url_commitment: str = ""
+    registry_version: int = REGISTRY_VERSION
 
     def to_json(self) -> dict[str, Any]:
         return {
             "network": self.network,
             "chain_id": int(self.chain_id),
             "contract_address": self.contract_address,
+            "registry_version": int(self.registry_version),
             "tx_hash": self.tx_hash,
             "block_number": int(self.block_number),
             "block_timestamp": int(self.block_timestamp),
             "submitter": self.submitter,
+            "url_commitment": self.url_commitment,
             "gas_used": int(self.gas_used),
             "explorer_url": self.explorer_url,
             "simulated": bool(self.simulated),
@@ -105,6 +145,7 @@ class ChainClient(Protocol):
 
     def register(self, data_hash: str, source_url: str) -> AnchorResult: ...
     def lookup(self, data_hash: str) -> ChainRecord: ...
+    def matches_url(self, data_hash: str, source_url: str) -> bool: ...
     def describe(self) -> dict[str, Any]: ...
 
 
@@ -115,6 +156,7 @@ class ChainClient(Protocol):
 
 def _get_artifact_path():
     import sys
+
     chain_mod = sys.modules.get("src.chain")
     if chain_mod is not None and hasattr(chain_mod, "ARTIFACT_PATH"):
         return chain_mod.ARTIFACT_PATH
@@ -127,10 +169,15 @@ def compile_contract(*, force: bool = False) -> dict[str, Any]:
     The artifact is cached because ``solc`` has to be downloaded on first use,
     which needs network access - so a cached artifact means deploying later
     (or on a locked-down machine) does not require the compiler at all.
+
+    A cached artifact built from a different source (or an older interface) is
+    rejected: it would otherwise be deployed or used silently.
     """
     art_path = _get_artifact_path()
     if art_path.exists() and not force:
-        return load_artifact()
+        artifact = load_artifact()
+        if _artifact_matches_source(artifact):
+            return artifact
 
     if not CONTRACT_SOURCE.exists():
         raise ChainError(f"contract source missing: {CONTRACT_SOURCE}")
@@ -139,8 +186,8 @@ def compile_contract(*, force: bool = False) -> dict[str, Any]:
         import solcx
     except ImportError as exc:
         raise ChainError(
-            "py-solc-x is not installed (pip install py-solc-x), and no prebuilt "
-            f"artifact was found at {ARTIFACT_PATH}"
+            "py-solc-x is not installed (pip install py-solc-x), and no usable "
+            f"prebuilt artifact was found at {art_path}"
         ) from exc
 
     try:
@@ -165,22 +212,41 @@ def compile_contract(*, force: bool = False) -> dict[str, Any]:
     artifact = {
         "contractName": CONTRACT_NAME,
         "solcVersion": SOLC_VERSION,
+        "registryVersion": REGISTRY_VERSION,
         "abi": compiled[key]["abi"],
         "bytecode": compiled[key]["bin"],
-        "sourceSha256": sha256_bytes(CONTRACT_SOURCE.read_bytes()),
+        "sourceSha256": sha256_bytes(_normalised_source()),
     }
-    BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    ARTIFACT_PATH.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+    art_path.parent.mkdir(parents=True, exist_ok=True)
+    art_path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
     return artifact
+
+
+def _normalised_source() -> bytes:
+    """Source bytes with line endings normalised, so Git autocrlf cannot change the hash."""
+    return CONTRACT_SOURCE.read_bytes().replace(b"\r\n", b"\n")
+
+
+def _artifact_matches_source(artifact: dict[str, Any]) -> bool:
+    """True if the cached artifact was built from the current source.
+
+    Artifacts without ``sourceSha256`` (hand-made, or from tests) are trusted;
+    a recorded hash that disagrees means the artifact is stale.
+    """
+    recorded = artifact.get("sourceSha256")
+    if not recorded or not CONTRACT_SOURCE.exists():
+        return True
+    return recorded == sha256_bytes(_normalised_source())
 
 
 def load_artifact() -> dict[str, Any]:
     art_path = _get_artifact_path()
     if not art_path.exists():
-        raise ChainError(
-            f"no compiled artifact at {art_path}. Run: python -m src.main deploy"
-        )
-    return json.loads(art_path.read_text(encoding="utf-8"))
+        raise ChainError(f"no compiled artifact at {art_path}. Run: python -m src.main deploy --compile-only")
+    try:
+        return json.loads(art_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise ChainError(f"compiled artifact at {art_path} is not valid JSON") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -188,23 +254,53 @@ def load_artifact() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _raw_tx_bytes(signed: Any) -> bytes:
-    """Extract raw transaction bytes across web3.py versions.
+_ALREADY_ANCHORED = (
+    "this exact verification hash is already anchored on-chain. The registry is "
+    "append-only and first-write-wins, so it cannot be overwritten. Re-run "
+    "'verify' to inspect the existing record."
+)
+# 4-byte selector of the custom error AlreadyRegistered(bytes32,uint48,address)
+_ALREADY_SELECTOR = "b3dd9787"
 
-    web3 v6 exposes ``rawTransaction``; v7 renamed it ``raw_transaction``.
-    """
-    for attribute in ("raw_transaction", "rawTransaction"):
-        value = getattr(signed, attribute, None)
-        if value is not None:
-            return value
-    raise ChainError(
-        "could not read raw transaction bytes from the signed transaction "
-        "(unexpected web3.py version)"
-    )
+
+def _short(exc: BaseException, limit: int = 240) -> str:
+    """One-line, bounded description of an upstream error (no response bodies)."""
+    text = " ".join(str(exc).split())
+    return f"{type(exc).__name__}: {text[:limit]}"
+
+
+def _redact_url(url: str) -> str:
+    """Show only scheme and host of an RPC URL: path, query and userinfo often hold API keys."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        if parts.port:
+            host = f"{host}:{parts.port}"
+    except ValueError:
+        return "(unparseable URL)"
+    return f"{parts.scheme}://{host}"
+
+
+def _hex0x(value: Any) -> str:
+    text = value.hex() if hasattr(value, "hex") else str(value)
+    return text if text.startswith("0x") else "0x" + text
+
+
+def _raw_tx_bytes(signed: Any) -> bytes:
+    """Raw bytes of a signed transaction (eth-account 0.13+ / web3.py 7 attribute name)."""
+    value = getattr(signed, "raw_transaction", None)
+    if value is None:
+        raise ChainError(
+            "could not read raw transaction bytes from the signed transaction "
+            "(unsupported eth-account / web3.py version; web3.py 7.x is required)"
+        )
+    return value
 
 
 class EvmChainClient:
-    """web3.py client for the deployed registry."""
+    """web3.py client for the deployed registry (interface v2)."""
 
     simulated = False
 
@@ -224,13 +320,20 @@ class EvmChainClient:
         self.w3 = Web3(Web3.HTTPProvider(settings.rpc_url, request_kwargs={"timeout": 60}))
         self._install_poa_middleware()
 
-        if not self.w3.is_connected():
+        try:
+            connected = self.w3.is_connected()
+        except Exception:  # noqa: BLE001
+            connected = False
+        if not connected:
             raise ChainError(
-                f"cannot reach the RPC endpoint at {settings.rpc_url}. Check the URL "
-                "and your network connection."
+                f"cannot reach the RPC endpoint at {_redact_url(settings.rpc_url)}. "
+                "Check the URL and your network connection."
             )
 
-        actual = self.w3.eth.chain_id
+        try:
+            actual = self.w3.eth.chain_id
+        except Exception as exc:  # noqa: BLE001
+            raise ChainError(f"RPC did not report a chain id: {_short(exc)}") from exc
         if actual != settings.chain_id:
             raise ChainError(
                 f"chain id mismatch: RPC reports {actual} but CHAIN_ID is "
@@ -245,30 +348,51 @@ class EvmChainClient:
 
         self.contract = None
         if settings.contract_address:
+            if not self.w3.is_address(settings.contract_address):
+                raise ChainError("CONTRACT_ADDRESS is not a valid address")
             self.contract = self.w3.eth.contract(
                 address=self.w3.to_checksum_address(settings.contract_address),
                 abi=self.artifact["abi"],
             )
+            self.check_compatibility()
+
+    def check_compatibility(self) -> int:
+        """Confirm the address hosts registry interface v2; return its version.
+
+        A v1 deployment (plaintext-URL interface) has no ``registryVersion``,
+        so the call reverts. Without this check the client would send a v2
+        ``register`` call to it and fail obscurely - or, for reads, report a
+        misleading "not anchored".
+        """
+        contract = self._require_contract()
+        try:
+            code = self.w3.eth.get_code(contract.address)
+        except Exception as exc:  # noqa: BLE001
+            raise ChainError(f"could not read contract code: {_short(exc)}") from exc
+        if not code:
+            raise IncompatibleContractError(
+                f"no contract code at {contract.address} on this chain. Check CONTRACT_ADDRESS and CHAIN_ID."
+            )
+        try:
+            version = int(contract.functions.registryVersion().call())
+        except Exception as exc:  # noqa: BLE001
+            raise IncompatibleContractError(
+                f"the contract at {contract.address} does not expose registryVersion(): "
+                "it is an older (v1, plaintext-URL) registry or not a registry at all. "
+                "Records anchored there cannot be checked through this build's v2 "
+                "interface; deploy the v2 contract manually (see README)."
+            ) from exc
+        if version != REGISTRY_VERSION:
+            raise IncompatibleContractError(
+                f"registry interface version {version} is not supported (expected {REGISTRY_VERSION})"
+            )
+        return version
 
     def _install_poa_middleware(self) -> None:
-        """Tolerate chains whose ``extraData`` exceeds 32 bytes.
+        """Tolerate chains whose ``extraData`` exceeds 32 bytes (web3.py 7 API)."""
+        from web3.middleware import ExtraDataToPOAMiddleware
 
-        Harmless on chains that do not need it, and prevents an obscure
-        ExtraDataLengthError on those that do.
-        """
-        try:  # web3 v7
-            from web3.middleware import ExtraDataToPOAMiddleware
-
-            self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
-            return
-        except Exception:
-            pass
-        try:  # web3 v6
-            from web3.middleware import geth_poa_middleware
-
-            self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
-        except Exception:
-            pass
+        self.w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
 
     def _load_account(self):
         from eth_account import Account
@@ -276,30 +400,34 @@ class EvmChainClient:
         key = self.settings.private_key.strip()
         if not key:
             raise ChainError(
-                "PRIVATE_KEY is not set. Use a burner wallet funded from a Base "
-                "Sepolia faucet - never a key holding real assets."
+                "PRIVATE_KEY is not set. Use a burner wallet funded from a testnet "
+                "faucet - never a key holding real assets."
             )
         if not key.startswith("0x"):
             key = "0x" + key
         try:
             return Account.from_key(key)
         except Exception as exc:
-            raise ChainError(f"PRIVATE_KEY is not a valid private key: {exc}") from exc
+            # Do not echo the library message: it can include key material.
+            raise ChainError("PRIVATE_KEY is not a valid private key") from exc
 
     # -- helpers -----------------------------------------------------------
 
     def _require_contract(self):
         if self.contract is None:
             raise ChainError(
-                "CONTRACT_ADDRESS is not set. Deploy first with "
-                "'python -m src.main deploy', then put the address in .env"
+                "CONTRACT_ADDRESS is not set. Deploy the v2 registry manually "
+                "(see README > Manual deployment), then put the address in .env"
             )
         return self.contract
 
     @staticmethod
     def _to_bytes32(data_hash: str) -> bytes:
         text = data_hash[2:] if data_hash.startswith("0x") else data_hash
-        raw = bytes.fromhex(text)
+        try:
+            raw = bytes.fromhex(text)
+        except ValueError as exc:
+            raise ChainError("expected a hex-encoded 32-byte hash") from exc
         if len(raw) != 32:
             raise ChainError(f"expected a 32-byte hash, got {len(raw)} bytes")
         return raw
@@ -311,20 +439,27 @@ class EvmChainClient:
         return wei / 1e18
 
     def _send(self, tx: dict[str, Any]) -> Any:
-        signed = self.account.sign_transaction(tx)
-        tx_hash = self.w3.eth.send_raw_transaction(_raw_tx_bytes(signed))
-        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
+        if self.account is None:
+            raise ChainError("a signer (PRIVATE_KEY) is required to send transactions")
+        try:
+            signed = self.account.sign_transaction(tx)
+            tx_hash = self.w3.eth.send_raw_transaction(_raw_tx_bytes(signed))
+            receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash, timeout=300)
+        except ChainError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - includes TimeExhausted and RPC errors
+            raise ChainError(f"transaction could not be confirmed: {_short(exc)}") from exc
         if receipt.get("status") != 1:
-            raise ChainError(f"transaction reverted on-chain: {tx_hash.hex()}")
+            raise ChainError(f"transaction reverted on-chain: {_hex0x(tx_hash)}")
         return receipt
 
     # -- operations --------------------------------------------------------
 
     def deploy(self) -> tuple[str, str]:
-        """Deploy the registry. Returns ``(address, tx_hash)``."""
-        factory = self.w3.eth.contract(
-            abi=self.artifact["abi"], bytecode=self.artifact["bytecode"]
-        )
+        """Deploy the registry. Returns ``(address, tx_hash)``. Spends gas."""
+        if self.account is None:
+            raise ChainError("a signer (PRIVATE_KEY) is required to deploy")
+        factory = self.w3.eth.contract(abi=self.artifact["abi"], bytecode=self.artifact["bytecode"])
         tx = factory.constructor().build_transaction(
             {
                 "from": self.account.address,
@@ -335,49 +470,57 @@ class EvmChainClient:
         receipt = self._send(tx)
         address = self.w3.to_checksum_address(receipt["contractAddress"])
         self.contract = self.w3.eth.contract(address=address, abi=self.artifact["abi"])
-        return address, receipt["transactionHash"].hex()
+        return address, _hex0x(receipt["transactionHash"])
 
     def register(self, data_hash: str, source_url: str) -> AnchorResult:
-        contract = self._require_contract()
-        raw_hash = self._to_bytes32(data_hash)
-        function = contract.functions.register(raw_hash, source_url)
+        """Anchor *data_hash* with the keccak256 commitment of *source_url*.
 
-        # Simulate first: a revert here is almost always AlreadyRegistered, and
-        # catching it before paying gas allows a precise message.
+        Only the commitment is transmitted; the URL never leaves this process.
+        """
+        contract = self._require_contract()
+        if self.account is None:
+            raise ChainError("a signer (PRIVATE_KEY) is required to register")
+        raw_hash = self._to_bytes32(data_hash)
+        commitment = url_commitment(source_url)
+        function = contract.functions.register(raw_hash, self._to_bytes32(commitment))
+
+        # Check for a duplicate explicitly: relying on the revert text is
+        # fragile because custom errors surface as raw selectors on many RPCs.
+        if self.lookup(data_hash).exists:
+            raise ChainError(_ALREADY_ANCHORED)
+
+        # Simulate before paying gas so a revert gets a precise message.
         try:
             function.call({"from": self.account.address})
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             message = str(exc)
-            if "AlreadyRegistered" in message or "already" in message.lower():
-                raise ChainError(
-                    "this exact verification hash is already anchored on-chain. "
-                    "The registry is append-only and first-write-wins, so it "
-                    "cannot be overwritten. Re-run 'verify' to inspect the "
-                    "existing record."
-                ) from exc
-            raise ChainError(f"the transaction would revert: {message}") from exc
+            if "AlreadyRegistered" in message or _ALREADY_SELECTOR in message.lower():
+                raise ChainError(_ALREADY_ANCHORED) from exc
+            raise ChainError(f"the transaction would revert: {_short(exc)}") from exc
 
-        tx = function.build_transaction(
-            {
-                "from": self.account.address,
-                "nonce": self.w3.eth.get_transaction_count(self.account.address),
-                "chainId": self.chain_id,
-            }
-        )
-        # A modest buffer over the estimate: the estimate is made against the
-        # pending state, and a competing transaction can shift real cost.
+        try:
+            tx = function.build_transaction(
+                {
+                    "from": self.account.address,
+                    "nonce": self.w3.eth.get_transaction_count(self.account.address),
+                    "chainId": self.chain_id,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ChainError(f"could not build the transaction: {_short(exc)}") from exc
+        # A modest buffer over the estimate: a competing transaction can shift real cost.
         if "gas" in tx:
             tx["gas"] = int(tx["gas"] * 1.25)
 
         receipt = self._send(tx)
-        block = self.w3.eth.get_block(receipt["blockNumber"])
-        tx_hash = receipt["transactionHash"].hex()
-        if not tx_hash.startswith("0x"):
-            tx_hash = "0x" + tx_hash
+        try:
+            block = self.w3.eth.get_block(receipt["blockNumber"])
+        except Exception as exc:  # noqa: BLE001
+            raise ChainError(f"could not read the anchoring block: {_short(exc)}") from exc
 
         return AnchorResult(
             data_hash=data_hash,
-            tx_hash=tx_hash,
+            tx_hash=_hex0x(receipt["transactionHash"]),
             block_number=int(receipt["blockNumber"]),
             block_timestamp=int(block["timestamp"]),
             contract_address=contract.address,
@@ -385,35 +528,46 @@ class EvmChainClient:
             chain_id=self.chain_id,
             network=self.network,
             gas_used=int(receipt.get("gasUsed", 0)),
-            explorer_url=self.settings.tx_url(tx_hash),
+            explorer_url=self.settings.tx_url(_hex0x(receipt["transactionHash"])),
+            url_commitment=commitment,
         )
 
     def lookup(self, data_hash: str) -> ChainRecord:
         contract = self._require_contract()
-        exists, submitter, timestamp, block_number, url_hash = contract.functions.verify(
-            self._to_bytes32(data_hash)
-        ).call()
+        key = self._to_bytes32(data_hash)
+        try:
+            exists, submitter, timestamp, block_number, url_hash = contract.functions.verify(key).call()
+        except Exception as exc:  # noqa: BLE001
+            raise ChainError(f"chain lookup failed: {_short(exc)}") from exc
         return ChainRecord(
             exists=bool(exists),
             submitter=str(submitter),
             timestamp=int(timestamp),
             block_number=int(block_number),
-            url_hash=url_hash.hex() if hasattr(url_hash, "hex") else str(url_hash),
+            url_hash=_hex0x(url_hash),
         )
 
     def matches_url(self, data_hash: str, source_url: str) -> bool:
+        """True/False if the commitment was checked; ``ChainError`` if it could not be.
+
+        Never returns True for a check that did not run.
+        """
         contract = self._require_contract()
-        return bool(
-            contract.functions.matchesUrl(self._to_bytes32(data_hash), source_url).call()
-        )
+        key = self._to_bytes32(data_hash)
+        commitment = self._to_bytes32(url_commitment(source_url))
+        try:
+            return bool(contract.functions.matchesUrlHash(key, commitment).call())
+        except Exception as exc:  # noqa: BLE001
+            raise ChainError(f"URL commitment check failed: {_short(exc)}") from exc
 
     def describe(self) -> dict[str, Any]:
         return {
             "network": self.network,
             "chain_id": self.chain_id,
-            "rpc_url": self.settings.rpc_url,
+            "rpc_url": _redact_url(self.settings.rpc_url),
             "contract_address": self.settings.contract_address,
             "signer": self.account.address if self.account else "",
+            "registry_version": REGISTRY_VERSION,
             "simulated": False,
         }
 
@@ -426,14 +580,14 @@ class EvmChainClient:
 class MockChainClient:
     """Local stand-in for the chain, used by ``--dry-run``.
 
-    Exists so the pipeline can be rehearsed end to end without spending faucet
-    funds or waiting on a testnet, and so the offline test suite can exercise
-    the anchoring path. It reproduces the contract's semantics that actually
-    matter - first-write-wins, an immutable append-only store, a recorded
-    submitter - so a dry run fails in the same places a real run would.
+    NOT A BLOCKCHAIN. It is a JSON file. It exists so the pipeline can be
+    rehearsed end to end without a wallet, gas or network, and so the offline
+    test suite can exercise the anchoring path. It reproduces the contract
+    semantics that matter - first-write-wins, append-only, URL stored only as a
+    commitment - so a dry run fails in the same places a real run would.
 
-    Records written here are marked ``"simulated": true`` in the payload's
-    anchor block, so a simulated record can never be mistaken for a real one.
+    Everything it produces is labelled ``"simulated": true`` and its network
+    name ends in ``-simulated``.
     """
 
     simulated = True
@@ -446,28 +600,19 @@ class MockChainClient:
         self._state: dict[str, Any] = {"records": {}, "head": 0}
         if self.path.exists():
             try:
-                self._state = json.loads(self.path.read_text(encoding="utf-8"))
+                loaded = json.loads(self.path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    self._state = loaded
             except ValueError:
                 pass
-        self._state.setdefault("records", {})
-        self._state.setdefault("head", 0)
+        if not isinstance(self._state.get("records"), dict):
+            self._state["records"] = {}
+        if not isinstance(self._state.get("head"), int):
+            self._state["head"] = 0
 
     def _save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self._state, indent=2), encoding="utf-8")
-
-    @staticmethod
-    def _url_hash(url: str) -> str:
-        """keccak256 of the URL when web3 is available, else a labelled SHA-256.
-
-        The mock also keeps the plaintext URL, so URL checking here compares
-        strings directly and does not depend on this value.
-        """
-        try:
-            from web3 import Web3
-
-            return Web3.keccak(text=url).hex()
-        except Exception:
-            return "0x" + sha256_bytes(url.encode("utf-8"))
 
     def register(self, data_hash: str, source_url: str) -> AnchorResult:
         import time
@@ -480,13 +625,13 @@ class MockChainClient:
                 f"Delete {self.path.name} to reset the simulation."
             )
 
+        commitment = url_commitment(source_url)
         self._state["head"] = int(self._state["head"]) + 1
         now = int(time.time())
         submitter = "0x" + "11" * 20
         entry = {
             "data_hash": key,
-            "source_url": source_url,
-            "url_hash": self._url_hash(source_url),
+            "url_hash": commitment,
             "submitter": submitter,
             "timestamp": now,
             "block_number": self._state["head"],
@@ -506,6 +651,7 @@ class MockChainClient:
             gas_used=0,
             explorer_url="",
             simulated=True,
+            url_commitment=commitment,
         )
 
     def lookup(self, data_hash: str) -> ChainRecord:
@@ -518,12 +664,11 @@ class MockChainClient:
             timestamp=int(entry["timestamp"]),
             block_number=int(entry["block_number"]),
             url_hash=entry["url_hash"],
-            extra={"source_url": entry.get("source_url", "")},
         )
 
     def matches_url(self, data_hash: str, source_url: str) -> bool:
         entry = self._state["records"].get(data_hash.lower())
-        return bool(entry) and entry.get("source_url") == source_url
+        return bool(entry) and entry.get("url_hash") == url_commitment(source_url)
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -531,13 +676,12 @@ class MockChainClient:
             "chain_id": self.chain_id,
             "store": str(self.path),
             "records": len(self._state["records"]),
+            "registry_version": REGISTRY_VERSION,
             "simulated": True,
         }
 
 
-def build_chain_client(
-    settings: Settings, *, dry_run: bool = False, require_signer: bool = True
-) -> ChainClient:
+def build_chain_client(settings: Settings, *, dry_run: bool = False, require_signer: bool = True) -> ChainClient:
     if dry_run:
         return MockChainClient(settings)
     return EvmChainClient(settings, require_signer=require_signer)

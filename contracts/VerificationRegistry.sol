@@ -21,11 +21,18 @@ pragma solidity ^0.8.20;
 ///    attributable. It proves who asserted the claim; it does not make the
 ///    claim true. See the Limitations section of the README.
 ///
-/// 4. THE URL IS HASHED IN STORAGE, FULL IN THE EVENT. Storing a string costs a
-///    fresh 32-byte slot per 32 characters; a `keccak256` digest is one slot
-///    regardless of length and still lets anyone prove which URL was
-///    registered. The human-readable URL is emitted in the event, where data is
-///    dramatically cheaper because it is never part of contract state.
+/// 4. THE PLAINTEXT URL NEVER REACHES THE CHAIN (registry v2). The client
+///    computes `keccak256(bytes(url))` locally and submits only that 32-byte
+///    commitment. Neither calldata, storage nor the event log contains the URL,
+///    so the transaction does not publish it. Anyone who already holds a
+///    candidate URL can recompute the commitment and compare; the commitment
+///    is not secret against guessing (a low-entropy or guessable URL can be
+///    confirmed by brute force) and it does not prove the URL was ever
+///    authentic or published at any particular time.
+///
+///    COMPATIBILITY: v1 deployments exposed `register(bytes32,string)` and
+///    emitted the full URL. This version has a different selector and a
+///    `registryVersion()` getter so clients can detect which one they talk to.
 ///
 /// 5. NO BIOMETRIC DATA IS STORED. Only a SHA-256 digest of the canonical
 ///    verification payload is ever written on-chain. No face embedding, no
@@ -64,7 +71,6 @@ contract VerificationRegistry {
         bytes32 indexed dataHash,
         address indexed submitter,
         bytes32 indexed urlHash,
-        string sourceUrl,
         uint48 timestamp
     );
 
@@ -74,15 +80,23 @@ contract VerificationRegistry {
     /// @notice The zero hash is not a meaningful commitment.
     error ZeroHash();
 
+    /// @notice Interface revision. 2 = URL commitment only, no plaintext URL.
+    /// @dev Absent on v1 deployments, so a call to it reverting is the
+    ///      signal that the deployment predates this interface.
+    function registryVersion() external pure returns (uint8) {
+        return 2;
+    }
+
     /// @notice Register the verification hash of a provenance claim.
     /// @param dataHash  SHA-256 of the canonical verification payload.
-    /// @param sourceUrl The matched social-media post URL, for the event log.
+    /// @param urlHash   keccak256 of the exact UTF-8 bytes of the source URL,
+    ///                  computed by the client. The URL itself is not sent.
     /// @return timestamp The block timestamp the record was anchored at.
-    function register(bytes32 dataHash, string calldata sourceUrl)
+    function register(bytes32 dataHash, bytes32 urlHash)
         external
         returns (uint48 timestamp)
     {
-        if (dataHash == bytes32(0)) revert ZeroHash();
+        if (dataHash == bytes32(0) || urlHash == bytes32(0)) revert ZeroHash();
 
         Record storage existing = _records[dataHash];
         // `timestamp` doubles as the existence flag: block.timestamp is never
@@ -92,7 +106,6 @@ contract VerificationRegistry {
         }
 
         timestamp = uint48(block.timestamp);
-        bytes32 urlHash = keccak256(bytes(sourceUrl));
 
         _records[dataHash] = Record({
             submitter: msg.sender,
@@ -106,7 +119,7 @@ contract VerificationRegistry {
             totalRecords += 1;
         }
 
-        emit Registered(dataHash, msg.sender, urlHash, sourceUrl, timestamp);
+        emit Registered(dataHash, msg.sender, urlHash, timestamp);
     }
 
     /// @notice Look up a record.
@@ -114,7 +127,7 @@ contract VerificationRegistry {
     /// @return submitter   Address that registered it.
     /// @return timestamp   Block timestamp at registration.
     /// @return blockNumber Block height at registration.
-    /// @return urlHash     keccak256 of the registered source URL.
+    /// @return urlHash     URL commitment supplied at registration.
     function verify(bytes32 dataHash)
         external
         view
@@ -135,14 +148,14 @@ contract VerificationRegistry {
         return _records[dataHash].timestamp != 0;
     }
 
-    /// @notice Check a hash and a plaintext URL against the stored record in
-    ///         one call, without trusting the caller's copy of either.
-    function matchesUrl(bytes32 dataHash, string calldata sourceUrl)
+    /// @notice Check a hash and a URL commitment against the stored record in
+    ///         one call. Pass `keccak256(bytes(url))`; the URL is not sent.
+    function matchesUrlHash(bytes32 dataHash, bytes32 urlHash)
         external
         view
         returns (bool)
     {
         Record storage r = _records[dataHash];
-        return r.timestamp != 0 && r.urlHash == keccak256(bytes(sourceUrl));
+        return r.timestamp != 0 && r.urlHash == urlHash;
     }
 }

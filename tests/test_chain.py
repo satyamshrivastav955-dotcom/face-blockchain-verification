@@ -21,6 +21,7 @@ from src.chain import (
     ChainRecord,
     MockChainClient,
     build_chain_client,
+    url_commitment,
 )
 from src.config import Settings
 
@@ -65,7 +66,9 @@ class TestRegister:
         client.register(HASH_A, URL_A)
         with pytest.raises(ChainError):
             client.register(HASH_A, "https://evil.example/")
-        assert client.lookup(HASH_A).extra["source_url"] == URL_A
+        # The mock, like the v2 contract, stores only the URL commitment.
+        assert client.lookup(HASH_A).url_hash == url_commitment(URL_A)
+        assert client.matches_url(HASH_A, URL_A)
 
     def test_distinct_hashes_both_register(self, client):
         first = client.register(HASH_A, URL_A)
@@ -172,8 +175,13 @@ class TestContractInvariants:
     def test_submitter_is_msg_sender(self, source):
         assert "submitter: msg.sender" in source
 
-    def test_event_carries_the_full_url(self, source):
-        assert "string sourceUrl" in source
+    def test_no_plaintext_url_anywhere_in_the_interface(self, source):
+        """Registry v2: the URL must not appear in calldata, storage or events."""
+        code = "\n".join(
+            line for line in source.splitlines() if not line.lstrip().startswith("///")
+        )
+        assert "string" not in code
+        assert "sourceUrl" not in code
 
     def test_no_biometric_field(self, source):
         """The struct must hold only the four intended fields, none biometric."""
