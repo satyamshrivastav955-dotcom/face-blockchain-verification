@@ -118,7 +118,7 @@
     <text x="65" y="74" class="title-text" text-anchor="middle">2. Local SFace</text>
     <text x="65" y="92" class="sub-text" text-anchor="middle">128-d Embedding</text>
     <rect x="18" y="103" width="94" height="18" rx="4" fill="#38bdf8" fill-opacity="0.1" stroke="#38bdf8" stroke-opacity="0.3"/>
-    <text x="65" y="115" class="tag-text" fill="#7dd3fc" text-anchor="middle">🔒 Zero-Leak</text>
+    <text x="65" y="115" class="tag-text" fill="#7dd3fc" text-anchor="middle">🔒 Embedding stays local</text>
   </g>
 
   <!-- ==================== NODE 3: REVERSE SEARCH ==================== -->
@@ -137,10 +137,10 @@
     <rect width="130" height="130" class="node-card" fill="url(#nodeGrad1)" stroke="#ec4899" stroke-opacity="0.6"/>
     <circle cx="65" cy="36" r="18" fill="#ec4899" fill-opacity="0.12" stroke="#ec4899" stroke-width="1.2"/>
     <text x="65" y="42" font-size="18" text-anchor="middle">🛡️</text>
-    <text x="65" y="74" class="title-text" text-anchor="middle">4. Dual Confirm</text>
-    <text x="65" y="92" class="sub-text" text-anchor="middle">Cosine &amp; pHash</text>
+    <text x="65" y="74" class="title-text" text-anchor="middle">4. Local Confirm</text>
+    <text x="65" y="92" class="sub-text" text-anchor="middle">Face cosine / pHash</text>
     <rect x="14" y="103" width="102" height="18" rx="4" fill="#ec4899" fill-opacity="0.1" stroke="#ec4899" stroke-opacity="0.3"/>
-    <text x="65" y="115" class="tag-text" fill="#f472b6" text-anchor="middle">Anti-Hardcode</text>
+    <text x="65" y="115" class="tag-text" fill="#f472b6" text-anchor="middle">Re-checked locally</text>
   </g>
 
   <!-- ==================== NODE 5: BLOCKCHAIN ANCHOR ==================== -->

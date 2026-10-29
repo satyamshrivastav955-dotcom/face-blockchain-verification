@@ -20,10 +20,11 @@ confirmed match. That is a valid demonstration, but it is not the happy path.
 What works well: your own profile picture from a public social account; a clearly public-figure
 press photo; any consenting subject whose photo you have permission to upload.
 
-What to avoid: a photograph of someone who has not agreed to it. Note that with the default
-configuration the query image is **uploaded to a third-party host** so Google Lens can fetch it —
-see the privacy section of the main README. `PUBLISH_PROVIDER=none` with `--image-url` avoids the
-upload if you host the image yourself, and TinEye accepts a direct upload instead.
+What to avoid: a photograph of someone who has not agreed to it. Nothing is uploaded or searched
+unless you pass an explicit consent flag (`--consent-external-search`, and `--consent-public-upload`
+for URL-only providers); the default `PUBLISH_PROVIDER=none` never uploads. See "Real search and
+explicit consent" in the main README. `--image-url` with a host you control avoids any upload, and
+TinEye receives the file directly instead of a public link.
 
 Practical notes: a single clearly-visible face works best, since only the highest-confidence
 detection is used; a face smaller than roughly 80×80 pixels tends to embed poorly; and heavy

@@ -1,5 +1,5 @@
 ## 🖥️ FaceProof — Web Application Vision
-**FaceProof** is a proposed web interface for the Face Blockchain Verification project, designed to transform an existing Python-based image provenance verification pipeline into an interactive, evidence-driven application.
+**FaceProof** is a web interface (first local slice implemented; see Development Status) for the Face Blockchain Verification project, designed to transform an existing Python-based image provenance verification pipeline into an interactive, evidence-driven application.
 
 The goal is to make image provenance analysis, candidate comparison, cryptographic integrity checks, and blockchain-backed verification accessible through a clean, modern interface.
 
@@ -58,8 +58,8 @@ Instead of interacting with the verification engine through terminal commands, u
 | Component | Technology |
 |---|---|
 | Frontend | React + TypeScript + Vite |
-| UI and styling | Tailwind CSS + shadcn/ui |
-| Icons | Lucide |
+| UI and styling | Tailwind CSS + shadcn/ui *(proposed; the implemented UI uses plain CSS)* |
+| Icons | Lucide *(proposed; not used)* |
 | Backend API | FastAPI |
 | Computer vision | Existing OpenCV-based pipeline |
 | Blockchain integration | Existing Web3.py client and Solidity registry |
@@ -90,9 +90,27 @@ FaceProof is designed around transparency and verifiable evidence.
 
 ### 🚧 Development Status
 
-The existing repository contains the Python verification pipeline, evidence-generation workflow, verification-record integrity checks, and Solidity registry.
+*Updated against the code, 2026-10-29.* A **first local vertical slice is implemented and tested**; the rest of
+this document is still vision.
 
-The web application described here is the proposed next development stage. Frontend screens, FastAPI endpoints, job tracking, and web-based evidence management should be marked complete only after they have been implemented and tested.
+**Implemented** (`src/web/`, `web/`; see the README "Local web app" section):
+
+- Upload with preview, a privacy/consent panel, and a real pipeline job with honest stage status (no fake
+  percentages).
+- Candidate table, face-match vs image-derivative labelling, comparison image, claim and limitations.
+- Download of the real record and evidence manifest; independent record verification with optional image
+  binding; per-check PASS / FAIL / COULD NOT RUN / NOT CHECKED results; simulated chain and test-only
+  labelling.
+- Loopback-only server, upload limits, temp-file cleanup, no secrets or stack traces in responses.
+- Verified by 23 API tests running the real pipeline in demo mode, and one manual browser run. There are
+  **no automated browser tests**.
+
+**Not implemented:** Tailwind CSS / shadcn/ui / Lucide (the UI uses plain CSS; the table above is the original
+proposal, not what was built); persistent "evidence case management" (jobs live in a temporary directory and
+expire after an hour; the CLI's `evidence/` folder is the durable record); a system-health dashboard beyond the
+`/api/health` flags; a separate "review, then anchor" step (the run registers automatically unless the
+simulated chain is used); real-chain registration from the UI is off unless the server is started with
+`--allow-chain-writes`.
 
 ---
 
