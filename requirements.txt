@@ -4,6 +4,13 @@ numpy>=1.24,<3
 requests>=2.31
 python-dotenv>=1.0
 
+# C2PA Content Credentials (optional at runtime: state becomes "unavailable" without it)
+c2pa-python>=0.30,<1
+
+# ArcFace/SCRFD face engines (optional; the default opencv engine does not need it).
+# For GPU: pip install onnxruntime-gpu instead (needs CUDA 12 + cuDNN 9).
+onnxruntime>=1.18
+
 # Blockchain (web3.py 7.x API; web3 6 is no longer supported by the client)
 web3>=7.0,<8
 py-solc-x>=2.0.2

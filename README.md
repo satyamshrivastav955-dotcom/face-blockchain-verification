@@ -1,390 +1,313 @@
 <div align="center">
 
-<img src="assets/banner.svg" alt="Image-provenance verification" width="920"/>
+<img src="assets/readme/hero.svg" alt="FaceProof: the receipts for where an image appeared" width="100%"/>
 
 <br/>
 
-![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)
-![OpenCV YuNet + SFace](https://img.shields.io/badge/OpenCV-YuNet%20%2B%20SFace-5C3EE8?style=flat-square&logo=opencv&logoColor=white)
-![Solidity 0.8.24](https://img.shields.io/badge/Solidity-0.8.24-363636?style=flat-square&logo=solidity&logoColor=white)
-![Registry v2 not deployed](https://img.shields.io/badge/registry%20v2-not%20deployed-lightgrey?style=flat-square)
+![Python](https://img.shields.io/badge/python-3.10%2B-24364f?style=flat-square&labelColor=211c16)
+![OpenCV](https://img.shields.io/badge/OpenCV-YuNet%20%2B%20SFace-2e5842?style=flat-square&labelColor=211c16)
+![ONNX Runtime](https://img.shields.io/badge/ONNX%20Runtime-SCRFD%20%2B%20ArcFace-86281f?style=flat-square&labelColor=211c16)
+![C2PA](https://img.shields.io/badge/C2PA-content%20credentials-9e6b14?style=flat-square&labelColor=211c16)
+![Solidity](https://img.shields.io/badge/Solidity-0.8.24-24364f?style=flat-square&labelColor=211c16)
+![Registry v3](https://img.shields.io/badge/registry%20v3-tested%2C%20not%20deployed-7a6f5d?style=flat-square&labelColor=211c16)
 
-**Find where an image was published, re-check every lead locally, and anchor a hash of the evidence
-record on an EVM chain — without putting faces, embeddings or the source URL on-chain.**
+**Image provenance, kept on file.**<br/>
+Find where an image appeared, re-examine every lead on your own machine, say plainly whether the evidence is a *face match* or only *image similarity*, and anchor a tamper-evident hash — without putting a face, an embedding or a URL on-chain.
+
+[Landing page](#the-app) · [Pipeline](#the-pipeline) · [Measured results](#measured-results) · [Quickstart](#quickstart) · [CLI](#cli) · [Security](#security-and-privacy) · [Limits](#what-is-not-done-and-what-is-not-claimed)
 
 </div>
 
 > [!IMPORTANT]
-> **This is an image-provenance tool, not an identity-recognition product.** It never maps a face to a
-> person. A record says *what the pipeline measured* and *that its hash was registered at a time*; it does
-> not prove the claim is true, that a page is authentic, or who appears in a picture.
+> **This is an image-provenance tool, not an identity-recognition product.** It never maps a face to a person. A record says *what the pipeline measured* and *that its hash was registered at a time*. It does not prove a claim is true, that a page is authentic, or who appears in a photograph.
 
-## Contents
+---
 
-[What it does and does not prove](#what-it-does-and-does-not-prove) · [Architecture](#architecture-and-data-flow) ·
-[Install](#install) · [Configuration](#configuration-reference) · [Local-only demo](#local-only-demo-no-network-no-keys-no-gas) ·
-[Real search & consent](#real-search-and-explicit-consent) · [Register & verify](#register-and-verify) ·
-[Match types](#match-types-and-decision-policy) · [Records](#evidence-records) · [Smart contract](#smart-contract-and-deployment) ·
-[Web app](#local-web-app) · [Tests & CI](#testing-linting-and-ci) · [Security](#security-considerations) ·
-[Limitations](#limitations-and-responsible-use) · [Troubleshooting](#troubleshooting) · [Licence](#licence-and-attributions)
+## At a glance
 
-## What it does and does not prove
+<table>
+<tr>
+<td width="33%" valign="top">
 
-| It can show | It cannot show |
-|---|---|
-| This tool, run at time *T*, measured the recorded scores for the recorded candidate image. | That the matched image is the original, authentic or lawfully published. |
-| The sealed record has not been edited since sealing (hash recomputed offline). | That the claim in the record is *true* — anchoring proves registration of a hash, not truth. |
-| A hash was registered on-chain at a block/time, and the record's URL matches the on-chain commitment. | Who published the URL, or that it was live at registration time. |
-| For a **face match**: a face in the candidate scored ≥ the threshold against the query face under SFace. | Identity. A similarity score is not a person; look-alikes, age and pose change scores. |
-| For an **image derivative**: the candidate is perceptually similar to the query image (pHash). | That the same face or person appears — a pHash-only match is *image similarity*, and is labelled so everywhere. |
+**Honest evidence**<br/>
+Every accepted candidate carries exactly one label: *face match* or *image derivative*. A hash-only match is never described as a face match, and a check that could not run is *inconclusive*, never a pass.
 
-## Architecture and data flow
+</td>
+<td width="33%" valign="top">
 
-```mermaid
-flowchart LR
-    A[Input image] --> B["YuNet + SFace<br/>(local)"]
-    B -->|query embedding| C
-    A -->|"image or public URL<br/>(only with consent)"| S["Reverse-image search<br/>SerpApi/Lens or TinEye"]
-    S -->|candidate URLs = leads| D["SSRF-guarded download<br/>size + pixel limits"]
-    D --> C["Local confirmation<br/>cosine + pHash"]
-    C -->|"face match / image derivative / rejected / skipped"| E["Sealed record<br/>restricted-JCS + SHA-256"]
-    E -->|"hash + keccak256(url) only"| F[("VerificationRegistry v2<br/>or SIMULATED local file")]
-    E --> G["Evidence bundle<br/>+ manifest"]
-```
+**Local by default**<br/>
+Detection, embedding, re-checking, hashing and verification run on your machine. Search and public upload are opt-in, per run, with the exact data flow shown first.
 
-* **Local:** face detection/embedding, candidate re-checking, hashing, sealing, local verification, the
-  offline fixture/stub, the simulated chain.
-* **Third-party (opt-in):** the search provider (and, for URL-only providers, a public image host); the
-  candidate image hosts you download from; the RPC node. See [consent](#real-search-and-explicit-consent).
-* **On-chain:** the 32-byte payload hash and a 32-byte keccak256 commitment of the URL. Never the URL,
-  an embedding, or an image.
+</td>
+<td width="33%" valign="top">
 
-<div align="center"><img src="assets/pipeline_animated.svg" alt="Pipeline overview (animated)" width="100%"/></div>
+**Measured, not claimed**<br/>
+Models are benchmarked on public LFW, stress-tested, and the raw results are in the repo. What was *not* measured is listed as plainly as what was.
 
-## Install
+</td>
+</tr>
+</table>
 
-Python 3.10+ is required by design (`int.bit_count`). The suite was run on **Python 3.13.13**
-(Windows 11). The CI workflow targets 3.11–3.13 on Linux; it has **not** been run from this checkout, and
-3.10 is untested.
+## The app
+
+A local web app over the same pipeline — React + TypeScript frontend, FastAPI backend, loopback-only. Nothing in it is mocked: stages, scores, records and manifests are the pipeline's real output.
+
+<div align="center">
+<img src="assets/readme/landing_hero.png" alt="FaceProof landing page" width="860"/>
+</div>
+
+<details>
+<summary><b>Watch a full run</b> — mount an image, examine, seal, then examine the sealed record</summary>
+<br/>
+<div align="center">
+<img src="assets/readme/demo.gif" alt="Recorded demo run: mount the synthetic sample, begin examination, examine the sealed record" width="760"/>
+
+<sub>Real capture of the app in <b>demo mode</b> (stub engine, synthetic fixture, simulated ledger), produced by <code>scripts/capture_screenshots.py</code>.</sub>
+</div>
+</details>
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src="assets/readme/workspace_intake.png" alt="Case file: image mounted, disclosure and consent notice"/>
+<sub><b>Open a case.</b> Image mounted; the disclosure notice states exactly what a provider would receive before anything is sent.</sub>
+</td>
+<td width="50%" valign="top">
+<img src="assets/readme/examination.png" alt="Record examination: six numbered checks and a VERIFIED stamp"/>
+<sub><b>Examine a record.</b> Six numbered checks resolve one by one; <i>NOT CHECKED</i> and <i>COULD NOT RUN</i> are never shown as a pass.</sub>
+</td>
+</tr>
+</table>
+
+<details>
+<summary><b>A finished case</b> — proceedings, schedule of candidates, finding sheet</summary>
+<br/>
+<div align="center"><img src="assets/readme/workspace_result.png" alt="Finished case: schedule of candidates with rejections kept, and the finding sheet with seal and stamp" width="560"/></div>
+<sub>Rejections stay in the schedule. The finding carries its statement, its reservations, the engine and licence, the content-credentials state and the seal. This demo run is labelled <i>test-only</i> and <i>simulated</i> because it is.</sub>
+</details>
 
 ```bash
-python -m venv .venv
-.venv\Scripts\Activate.ps1            # Windows;  Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt -c constraints.txt      # reproducible, tested versions
-python scripts/fetch_models.py                          # ~37 MB, verified against pinned SHA-256
+pip install -r requirements-web.txt -c constraints.txt
+(cd web && npm ci && npm run build)
+python -m src.web            # http://127.0.0.1:8765, loopback only
+python -m src.web --demo     # adds the stub engine + synthetic fixture, labelled on every screen
+```
+
+## The pipeline
+
+<div align="center">
+<img src="assets/readme/pipeline.svg" alt="Pipeline: detect, embed, search, download, re-examine, seal, anchor, with where each stage runs" width="100%"/>
+</div>
+
+| Stage | What it does | Why this way |
+|---|---|---|
+| **Detect** | SCRFD-10G with 5-point landmarks, multi-scale letterbox, low-threshold retry when nothing is found | Current detector generation; recovers hard faces without extra inference |
+| **Embed** | Least-squares similarity alignment → ArcFace (R50 / R100), 512-d, flip test-time augmentation, ONNX Runtime (CUDA if present) | ArcFace-family accuracy; `opencv` (YuNet + SFace) remains the permissive default |
+| **Subject** | Face with the highest *prominence* (size × centrality); warns when a second face is comparable | Measured: "largest face" is wrong often enough to cost 2.4 points of accuracy |
+| **Search** | Reverse-image provider returns *leads*, never findings | Needs explicit consent; failures are errors, never "no match" |
+| **Download** | SSRF-guarded (IP-pinned, redirect-checked, size/pixel-bounded), bounded parallel pool | 4× faster at simulated latency; results still consumed in order |
+| **Re-examine** | Face cosine, geometric verification (SIFT + RANSAC), pHash — per candidate | Three tiers of evidence, each labelled for what it can and cannot show |
+| **Seal** | Restricted RFC 8785 canonical JSON → SHA-256; schema `faceverify/v2` | Deterministic, honestly named; old records still verify under their own rules |
+| **Anchor** | One transaction per record, or one Merkle root for many | Hash + keccak256(URL) only; never a face, vector or URL |
+
+### Evidence ladder
+
+<div align="center">
+<img src="assets/readme/evidence_ladder.svg" alt="Evidence ladder: face match, geometric image derivative, pHash image derivative" width="100%"/>
+</div>
+
+* **Geometric verification** recovers what a 64-bit pHash misses — crops, rotations, mirrored copies — and is *explainable*: the record stores how many local features agree on one transform. It was validated on synthetic images only; repeated textures, text and logos in real photos can create spurious matches (stated in the record's reservations).
+* **C2PA Content Credentials** on the source and matched image are read as independent provenance evidence. `valid` means signature and hashes verify, **not** that the signer is trusted (reported separately); `absent` proves nothing; `ai_generated` is only what the signer's manifest declares.
+* Selection among candidates is deterministic: face match → social domain → higher cosine → lower pHash → provider position → URL, independent of input order.
+
+## Measured results
+
+<div align="center">
+<img src="assets/readme/benchmark.svg" alt="Benchmark: SFace versus ArcFace on LFW, accuracy, true accepts at FAR 1e-3, stressed probes and latency" width="100%"/>
+</div>
+
+Full LFW protocol (6,000 pairs, 7,701 **raw, unaligned** images through the full detect → align → embed path), 10-fold cross-validated. The chart is drawn from [`docs/results/lfw_benchmark.json`](docs/results/lfw_benchmark.json) by `scripts/make_readme_assets.py`; reproduce with `scripts/benchmark_face.py`.
+
+| | SFace (MIT / Apache-2.0) | ArcFace-R50 | ArcFace-R100 |
+|---|---|---|---|
+| 10-fold accuracy | 99.32% ± 0.36 | **99.65% ± 0.29** | 99.63% ± 0.29 |
+| EER | 0.83% | **0.60%** | 0.67% |
+| True accepts @ FAR 1e-3 | 98.47% | **99.33%** | 99.30% |
+| Probe downscaled 5× | 94.3% | **99.5%** | 99.3% |
+| Probe rotated 30° | 90.2% | **99.7%** | 99.5% |
+| Latency, 1280 px | 169 ms (CPU) | **21 ms (GPU)** | 26 ms (GPU) |
+
+**Read this honestly.** LFW is near-saturated — the clean-accuracy gap is small and R100 is not better than R50 here; the stressed probes and the FAR-1e-3 point are where the newer models clearly separate. The GPU/CPU latency comparison is of *setups* (RTX 4050 laptop GPU vs this CPU), not of models. Each stress cell is 600 pairs, so ~1-point differences are noise. SFace's documented threshold (0.363) landed almost exactly on its measured FAR-1e-3 point (0.359) — an independent sanity check. IJB-C, CFP-FP, AgeDB, masks, age gaps and any demographic breakdown were **not** measured, and no fairness claim is made. Details and every caveat: [docs/EVALUATION.md](docs/EVALUATION.md).
+
+> [!WARNING]
+> **Licences.** The ArcFace/SCRFD weights come from the InsightFace project for **non-commercial research use only**. The licence is written into every record and printed by the CLI; the default engine (`opencv`) is permissively licensed.
+
+### Merkle-batched anchoring
+
+<div align="center">
+<img src="assets/readme/merkle.svg" alt="Merkle batch: one transaction anchors many records; each record keeps a logarithmic inclusion proof" width="100%"/>
+</div>
+
+`register --anchor-mode batch` seals records without anchoring; `anchor-batch` registers one RFC 6962 root for all of them and writes each record its inclusion proof. The leaf binds the URL commitment, so a valid proof also proves the URL matches. Measured on an in-process EVM: one record **74,464** gas; a batch of 1 **74,174**; a batch of 1,000 **74,186** — about **74 gas per record**. Real chains add calldata and L1-data fees, which this does not model. The tree matches Certificate Transparency reference values, an independent implementation and exhaustive proofs. **Registry v3 is compiled and tested, not deployed** — see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Quickstart
+
+```bash
+python -m venv .venv && source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
+pip install -r requirements.txt -c constraints.txt       # tested, pinned versions
+python scripts/fetch_models.py                           # OpenCV Zoo models, SHA-256 verified
 python -m src.main doctor --offline
 ```
 
-* **Dependency strategy:** ranges in `requirements*.txt` (what the code needs), exact tested pins in
-  `constraints.txt` (what was run), no second system. Dev/CI extras: `requirements-dev.txt`; web app:
-  `requirements-web.txt`.
-* **web3.py 7.x** is required (the client uses the v7 API; v6 is no longer supported).
-* **Models** come from the official [OpenCV Zoo](https://github.com/opencv/opencv_zoo)
-  (`face_detection_yunet_2023mar.onnx`, `face_recognition_sface_2021dec.onnx`). The pins in
-  `scripts/fetch_models.py` are the `oid sha256` / `size` values from the Zoo's own git-lfs pointer files,
-  confirmed equal to the downloaded files. Downloads are atomic and a mismatching file is deleted.
-  Weights are git-ignored. YuNet is MIT-licensed and SFace Apache-2.0 per the Zoo (checked 2026-10-29).
-  A newer YuNet (`2026may`) exists; the model was deliberately not changed.
-
-## Configuration reference
-
-Values come from the process environment, then `.env` (never committed; `doctor` never prints secrets).
-Copy `.env.example` to `.env`. Numeric values are validated at start-up.
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `SEARCH_PROVIDER` | `serpapi_lens` | `serpapi_lens` · `tineye` · `local_fixture` (offline test provider) |
-| `SERPAPI_KEY` / `TINEYE_API_KEY` | – | provider keys |
-| `FIXTURE_PATH` | – | candidates JSON for `local_fixture` (or `--fixture`) |
-| `PUBLISH_PROVIDER` | **`none`** | public image host used only with `--consent-public-upload`: `catbox` · `uguu` · `imgbb` · `none` |
-| `IMGBB_API_KEY` | – | for `imgbb` |
-| `CHAIN_NAME` / `CHAIN_ID` / `RPC_URL` / `EXPLORER_BASE` | Base Sepolia | target chain; the client refuses a chain-id mismatch |
-| `PRIVATE_KEY` | – | **burner** key, needed only to deploy/register; never for verification |
-| `CONTRACT_ADDRESS` | – | a **v2** registry (validated as an address; v1 is detected and rejected) |
-| `FACE_COSINE_THRESHOLD` | `0.363` | in (−1, 1]. OpenCV's documented SFace example value; not calibrated for your data |
-| `PHASH_MAX_DISTANCE` | `12` | 0–64 Hamming distance |
-| `MAX_CANDIDATES` | `25` | 1–100 candidates downloaded and checked |
-| `EVIDENCE_RETENTION_DAYS` | `0` | default age for `purge-evidence` (0 = none; nothing is deleted automatically) |
-| `PROJECT_DIR` | repo root | where `models/`, `output/`, `evidence/`, `localchain.json` live |
-
-## Local-only demo (no network, no keys, no gas)
+**Offline demo — no network, no keys, no gas.** Exercises everything except real recognition, a real search and a real chain, and cannot be mistaken for the real thing: the record is labelled test-only and simulated.
 
 ```bash
 python -m src.main register --image tests/data/query.png --fixture tests/data/candidates.json \
     --engine stub --allow-offline-stub --dry-run
 python -m src.main verify --record output/verification.json --dry-run
-python -m src.main tamper-demo --record output/verification.json --dry-run
 ```
 
-This exercises everything except real recognition, a real search and a real chain. It cannot be mistaken
-for the real thing: the stub engine and fixture each refuse to run without `--allow-offline-stub`, print
-banners, and the record carries `test_mode`, `"offline_stub": true`, a `TEST ONLY` claim prefix and a
-`-simulated` network name; `verify` repeats all of it. The fixtures are synthetic images (no faces).
-
-Real excerpt from running exactly the first two commands (this checkout, 2026-10-29):
+Real excerpt from running exactly that (this checkout, 2026-10-30):
 
 ```text
+    C2PA Content Credentials: absent (absence proves nothing)
   [1/2] x.com: FACE MATCH  cos=1.0000  pHash= 8/64  faces=1  [social]
   [2/2] example.org: rejected    cos=-0.0494  pHash=37/64  faces=1
-  ...
-  [OK] payload canonicalized (2637 bytes, sha256-jcs-rfc8785-restricted-v1)
+  [OK] payload canonicalized (3385 bytes, sha256-jcs-rfc8785-restricted-v1)
 -> Anchoring (SIMULATED local chain)
-  ! --dry-run: writing to a SIMULATED local file, not a blockchain
-  ...
   [OK] RECORD VERIFIED: UNMODIFIED, ANCHORED, URL COMMITMENT MATCHES
-    Not checked: image_binding, evidence_bundle.
+    Passed: hash recomputation, chain anchor, URL commitment.
+    Not checked: image_binding, evidence_bundle, merkle_inclusion.
     SIMULATED: this was checked against a local JSON file, NOT a blockchain.
     TEST-ONLY: the record itself came from a stub engine/fixture.
 ```
 
-(The stub scores `1.0000` because the "face" is the whole synthetic image; that is the point of calling it
-a stub.)
+(The stub scores 1.0000 because its "face" is the whole synthetic image — that is why it is called a stub.)
 
-## Real search and explicit consent
-
-Two steps send your photo (or a link to it) to someone else, so neither runs without a flag:
-
-| Step | Who gets what | Flag |
-|---|---|---|
-| Public upload (only for URL-only providers when no `--image-url`) | `catbox.moe` (fallback `uguu.se`) or `imgbb.com`: the **full image file, publicly reachable** | `--consent-public-upload` |
-| External search | **SerpApi → Google Lens**: a public URL of the image + your API key. **TinEye**: the full image file + your API key | `--consent-external-search` |
+**Higher-accuracy engines (optional, non-commercial weights):**
 
 ```bash
-# SerpApi needs a public URL: host the image yourself and pass it (no upload happens)
-python -m src.main register --image input/photo.jpg --consent-external-search \
-    --image-url https://example.com/my-photo.jpg
-# or let the tool upload it (PUBLISH_PROVIDER must not be 'none')
-python -m src.main register --image input/photo.jpg --consent-external-search --consent-public-upload
+python scripts/fetch_insightface.py        # SCRFD + ArcFace; checksum-pinned, atomic
+python -m src.main register --image photo.jpg --engine auto ...   # best available; r50 preferred
 ```
 
-Without consent the command prints exactly what *would* be sent and stops: `nothing has been sent`.
-`PUBLISH_PROVIDER` defaults to `none`; if it is `none` and a public URL is needed the run fails with an
-actionable message instead of uploading. This project makes **no retention or deletion promise** about any
-third party — consult their terms. A provider outage, quota error or malformed response is reported as a
-technical failure (exit 1), never as "no match".
-
-Minimising local data: `--minimal-evidence` skips face crops, the matched image bytes and the comparison
-image. Rejected candidates' bytes and face crops are never kept. `python -m src.main purge-evidence
---older-than-days N [--yes]` deletes old bundles (dry-run by default; `output/` records are never touched).
-
-## Register and verify
+**A real run** sends data to third parties, so it needs flags that say so:
 
 ```bash
-python -m src.main doctor                       # readiness; prints no secrets
-python -m src.main register --image input/photo.jpg --consent-external-search --image-url https://...
-python -m src.main verify --record output/verification.json --image input/photo.jpg \
-    --evidence-dir evidence/<run> --json
-python -m src.main tamper-demo --record output/verification.json
+python -m src.main register --image photo.jpg --consent-external-search --image-url https://you.example/photo.jpg
 ```
 
-`verify` runs separate checks and reports each one: **local integrity**, **image binding** (optional),
-**evidence bundle** (optional), **chain anchor**, **URL commitment**. It says *verified* only if every
-check the claim needs ran **and passed**; a check that could not run is never a pass.
+Without consent the command prints what *would* be sent and stops — `nothing has been sent`.
+
+## CLI
+
+| Command | Purpose |
+|---|---|
+| `register` | Full pipeline; `--engine`, `--anchor-mode single\|batch`, `--require-face-match`, `--minimal-evidence`, consent flags |
+| `anchor-batch` | One Merkle-root transaction for many sealed records (needs registry v3) |
+| `verify` | Recompute, bind to an image, check the bundle, look up the chain; `--json` for machines |
+| `tamper-demo` | Shows both forgery classes: naive edit (caught offline) and re-sealed edit (caught by the ledger) |
+| `search` | Search stage only |
+| `doctor` | Readiness; never prints a secret |
+| `purge-evidence` | Delete old local bundles (dry run by default) |
+| `deploy` | Compile / deploy the registry; refuses to spend gas without `--yes` |
 
 | Exit | Meaning |
 |---|---|
 | 0 | verified / success |
-| 1 | error (bad arguments, missing config, consent refused, provider/technical failure, malformed record) |
-| 2 | local failure: payload modified, wrong image, bad evidence bundle, unsupported algorithm |
-| 3 | not anchored: hash not on-chain (never registered, or edited and re-sealed) |
-| 4 | anchor conflict: anchored, but the on-chain URL commitment differs from the record |
-| 5 | no confirmed match (the pipeline ran and found nothing) |
-| **6** | **inconclusive**: a required check could not run (RPC down, incompatible/v1 contract, failed commitment lookup) |
+| 1 | error (config, consent refused, provider failure, malformed record) |
+| 2 | local failure: modified payload, wrong image, bad bundle, unsupported algorithm |
+| 3 | not anchored |
+| 4 | anchor conflict (URL commitment or inclusion proof) |
+| 5 | no confirmed match |
+| **6** | **inconclusive** — a required check could not run (RPC down, incompatible contract, failed lookup). Never a pass. |
 
-`--json` prints a machine-readable result (`verdict`, `checks`, `chain`, `simulated`, `test_only`,
-`exit_code`) on stdout with the human log on stderr. Exit 6 and 1 are new/clarified relative to earlier
-builds, which treated a failed URL-commitment lookup as success.
+## Security and privacy
 
-**Dry run vs real chain.** `--dry-run` writes to `localchain.json` — a plain JSON file with the registry's
-first-write-wins semantics. It is *not* a blockchain; the network is named `…-simulated`, the anchor says
-`"simulated": true`, and `verify` says so. `verify` needs no key or gas against a real chain.
+<details>
+<summary><b>Network:</b> SSRF-guarded fetching of untrusted URLs</summary>
 
-## Match types and decision policy
+Only `http(s)` on ports 80/443, no credentials; every hop including redirects (max 3, manual, loop-checked) is re-validated; every resolved address must be globally routable (IPv4/IPv6, mapped/6to4/NAT64/Teredo unwrapped); the TCP connect is **pinned to the validated IP** (DNS-rebinding); proxies and environment are ignored; 25 MiB, 20 s per request, 45 s total, image content types only. Headers are read before decoding (≤ 16384 px per side, ≤ 50 MP). A real loopback server is unreachable through the guarded session (tested). *Residual:* trusts the OS resolver; a public host can still serve hostile content.
+</details>
 
-Each candidate is downloaded (SSRF-guarded), re-analysed with the same detector/embedder, and measured
-two ways. The outcome names *which* evidence supported it:
+<details>
+<summary><b>Consent:</b> nothing leaves the machine without a flag</summary>
 
-| Outcome | Rule | Registerable? | Claim wording |
-|---|---|---|---|
-| `confirmed_face_match` | some face in the candidate: cosine ≥ threshold | yes — `evidence_type: face_match` | a face scored at/above the threshold; a similarity measurement, **not an identity statement** |
-| `confirmed_image_derivative` | pHash distance ≤ max **and the face test did not pass** | yes — `evidence_type: image_derivative` (or excluded with `--require-face-match`) | perceptually similar; **face matching did NOT independently confirm a match** |
-| `rejected_low_similarity` | face present, neither test passed | no | – |
-| `rejected_no_face_in_candidate` | no usable face, pHash too far | no | – |
-| `skipped_no_image_url` / `skipped_download_failed` / `skipped_url_blocked` / `skipped_analysis_failed` | measurement could not be made | no — **not** a negative result | – |
+External search and public upload each need their own flag; `PUBLISH_PROVIDER` defaults to `none`; the disclosure names the service and what it receives. No retention or deletion promise is made for any third party. `--minimal-evidence` keeps no face crops or downloaded bytes; rejected candidates' bytes are never kept; `purge-evidence` removes old bundles.
+</details>
 
-Both checks are always recorded (`face_check_passed`, `image_derivative_check_passed`). If both pass the
-outcome is the stronger `confirmed_face_match`. The old rule — "face OR pHash" — is kept because it finds
-resized/re-encoded copies, but it no longer presents a pHash-only hit as a face match. Boundaries are
-inclusive; a non-finite score or a candidate with no embeddable face can never pass the face test.
+<details>
+<summary><b>Chain:</b> what goes on the public ledger</summary>
 
-**Selection is deterministic:** face match before image derivative; then social-media domains; higher cosine;
-lower pHash; earlier provider position; then page URL and image URL as final tie-breaks — independent of
-input order. If every candidate was *skipped* (nothing measurable) the run exits 1, not 5. When several faces
-are found in the **query** image the largest is used (a warning is printed); in a candidate, the best-matching
-face is scored and the face count is recorded.
+Calldata is exactly selector + two `bytes32` (single) or selector + root + size (batch); events carry only hashes. The URL is never sent — only `keccak256(url)`, which is not secret against guessing and does not prove authenticity. Embeddings are never saved, sent or written on-chain; the stored fingerprint is a *commitment*, not anonymisation. Duplicate, zero and unknown cases, chain-id mismatch, reverted receipts and RPC timeouts are all tested on an in-process EVM.
+</details>
 
-## Evidence records
+<details>
+<summary><b>Verification fails closed</b></summary>
 
-`output/verification.json` (schema `faceverify/v2`) holds the sealed `payload`, `integrity`
-(`sha256-jcs-rfc8785-restricted-v1`) and the post-hoc `anchor`. The evidence bundle in `evidence/<run>/`
-holds the raw search response, candidate score table (rejections included), crops and manifest. Full format,
-the canonicalization limits, historical-record handling and what the manifest cannot prove:
-**[docs/RECORD_FORMAT.md](docs/RECORD_FORMAT.md)**.
+`verified` requires every check the claim needs to have run **and passed**. An unreachable chain, a v1/incompatible contract or a failed commitment lookup is *inconclusive* (exit 6). Unknown integrity algorithms fail; historical records verify under their original rules and are never re-interpreted. Canonicalization is a *restricted* RFC 8785 profile and is named as such.
+</details>
 
-Short version: canonicalization is a **restricted profile of RFC 8785** — byte-identical to JCS for what it
-accepts, but it rejects floats and integers beyond ±(2⁵³−1) and ill-formed Unicode — so it is *not* called
-"RFC 8785 compliant". Records written by earlier builds (`sha256-jcs-rfc8785`) still verify under their own
-rules and are never re-interpreted. The stored `embedding_commitment_sha256` is a commitment to the face
-embedding, not anonymisation; no raw embedding is ever saved.
+<details>
+<summary><b>Web app</b></summary>
 
-## Smart contract and deployment
+Loopback by default; `Host`/`Origin` checks; uploads ≤ 10 MiB validated as bounded images; one worker and a short queue; per-job temp directories deleted on request, after 1 h and on shutdown; only whitelisted artefacts served; real-chain writes need `--allow-chain-writes`; no stack traces or secrets in responses. There is **no authentication**: do not expose it.
+</details>
 
-`contracts/VerificationRegistry.sol` (Solidity 0.8.24, optimiser 200 runs) is append-only: first write wins,
-no owner/admin/upgrade/delete, zero hashes rejected, `exists` is explicit for unknown hashes, the submitter
-and block metadata are recorded.
+## Configuration
 
-**Registry v2 stops publishing the source URL.** The previous interface took the plaintext URL as calldata
-and emitted it in an event, so a URL could be read from the chain forever. v2 takes only
-`keccak256(exact URL bytes)`, computed by the client; calldata is exactly selector + two `bytes32`s and the
-event carries only hashes (`tests/test_registry_evm.py` checks calldata, logs and storage on an in-process
-EVM). Anyone holding a URL can re-hash it and compare. The commitment is **not secret against guessing** and
-does not prove the URL is authentic or when it was published.
+| Variable | Default | Meaning |
+|---|---|---|
+| `SEARCH_PROVIDER` | `serpapi_lens` | `serpapi_lens` · `tineye` · `local_fixture` (offline) |
+| `SERPAPI_KEY` / `TINEYE_API_KEY` | – | provider keys |
+| `PUBLISH_PROVIDER` | `none` | public image host, only with `--consent-public-upload` |
+| `RPC_URL` · `CHAIN_ID` · `CHAIN_NAME` · `EXPLORER_BASE` | Base Sepolia | target chain; chain-id mismatch is refused |
+| `PRIVATE_KEY` | – | **burner** key; only for deploy/register, never for verification |
+| `CONTRACT_ADDRESS` | – | a registry v2 or v3 deployment (v1 is detected and rejected) |
+| `FACE_COSINE_THRESHOLD` | per engine | if unset, each engine's benchmarked default (SFace 0.363, R50 0.25, R100 0.28) |
+| `PHASH_MAX_DISTANCE` | `12` | 0–64 |
+| `MAX_CANDIDATES` | `25` | 1–100 |
+| `EVIDENCE_RETENTION_DAYS` | `0` | default for `purge-evidence`; nothing is deleted automatically |
+| `PROJECT_DIR` | repo root | where `models/`, `output/`, `evidence/` live |
 
-> [!WARNING]
-> **Nothing has been deployed or sent by this work.** The v2 contract was compiled (solc 0.8.24) and run on an
-> in-process EVM only; v2 needs a **new manually authorised deployment**. An old v1 deployment is rejected
-> with a clear error (and `verify` exits 6), and a plaintext URL ever sent to a v1 contract stays public. No
-> deployment address is claimed. Procedure and migration notes: **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
-> `deploy` refuses to spend gas without `--yes`; `deploy --compile-only` is safe.
-
-## Local web app
-
-A thin local UI over the *same* pipeline: React + TypeScript + Vite frontend (`web/`), FastAPI backend
-(`src/web/`). Nothing in the UI is mocked — progress is the pipeline's real stage list, candidates and scores
-are its real table, the record/manifest are its real files.
+## Engineering
 
 ```bash
-pip install -r requirements-web.txt -c constraints.txt
-(cd web && npm ci && npm run build)
-python -m src.web                  # http://127.0.0.1:8765  (loopback only)
-python -m src.web --demo           # + stub engine and offline fixture, labelled on every screen
-```
-
-<div align="center">
-  <img src="assets/landing_page.png" alt="FaceProof landing page: evidence-dossier design with hero, procedure, the two evidence types, findings and chain of custody" width="760"/>
-</div>
-
-Journey: upload + preview → privacy panel and consent boxes (what is sent to whom) → job with real stage
-status → candidates table with outcome labels in text, face-match vs image-derivative evidence, comparison
-image, claim and limitations → download record/manifest → "Verify this record" and a separate *Check a
-record* tab (record + optional original image; per-check PASS / FAIL / COULD NOT RUN / NOT CHECKED).
-
-Safety: loopback by default (a warning if you change `--host`; there is no authentication); `Host`/`Origin`
-checks; uploads ≤ 10 MiB validated as bounded images; one worker, short queue; each job in a private temp
-dir, deleted on `DELETE`, after 1 h and on shutdown; only whitelisted artefact names are served; no endpoint
-fetches a URL for the client; real-chain registration needs `--allow-chain-writes` (otherwise the simulated
-chain is used, labelled); no stack traces or secrets in responses. A running pipeline step cannot be
-interrupted — "cancel" discards its result when it finishes (shown as *cancelling*).
-
-Verified: 23 API tests (real pipeline in demo mode) and one manual browser run — register on the synthetic
-fixture and verify the resulting record in the built-in browser. **Not done:** automated browser tests, the
-Tailwind/shadcn styling and persistent case management from the vision document (see `FACEPROOF_VISION.md`).
-
-## Testing, linting and CI
-
-```bash
-python -m pytest tests -q                     # hermetic: no network, keys, wallet or gas
-pip install -r requirements-dev.txt           # adds ruff, mypy, eth-tester (in-process EVM)
+python -m pytest tests -q                              # hermetic: no network, keys, wallet or gas
+pip install -r requirements-dev.txt                    # + ruff, mypy, eth-tester (in-process EVM)
 ruff check src tests scripts && ruff format --check src tests scripts && mypy
 (cd web && npm ci && npm run build)
+python scripts/make_readme_assets.py                   # regenerate the SVGs (benchmark from the JSON)
+python scripts/capture_screenshots.py                  # regenerate screenshots + GIF from the live app
 ```
 
-Last run in this checkout (Python 3.13.13, Windows): **578 passed** with the dev extras (in-process EVM,
-real model weights, web API); **557 passed, 1 skipped** without `eth-tester` (the EVM module skips with a
-reason). The earlier README's "258 tests" was a historical figure. Coverage includes: all match outcomes and
-boundaries, deterministic selection, claim wording, fail-closed verification paths, SSRF/redirect/size/decode
-limits (including a real loopback server unreachable through the guarded session), consent gates, secret
-redaction, record/bundle tampering, RFC 8785 vectors + a JavaScript cross-check, and contract behaviour
-(duplicate/zero/unknown, no URL in calldata/events/storage, v1 detection, receipt/timeout/RPC failures).
+As of 2026-10-30 (Python 3.13.13, Windows 11): **695 tests pass** with the dev extras (in-process EVM, real model weights, web API, C2PA); **665 pass, 1 skipped** in a clean environment from `requirements.txt` alone (the EVM module skips with a reason). Coverage includes every match outcome and boundary, deterministic selection, fail-closed verification, SSRF/redirect/size/decode limits, consent gates and secret redaction, record and bundle tampering, RFC 8785 vectors with a JavaScript cross-check, RFC 6962 reference values, contract behaviour (duplicates, zero values, v1/v2/v3 detection, calldata and events, gas), SCRFD decode and alignment, geometric verification, C2PA (including a real signed sample and a tampered copy) and download concurrency.
 
-`.github/workflows/ci.yml` runs lint, format, mypy, compile, tests and contract compilation on Python
-3.11–3.13, plus the frontend build — no secrets, no downloads of models, no transactions, no
-`continue-on-error`. It was validated as YAML but **has not been executed on GitHub**. `ruff format` is
-enforced for new/rewritten files; pre-existing modules listed in `pyproject.toml` are excluded to avoid a
-repo-wide reformat.
+`.github/workflows/ci.yml` runs lint, format, mypy, tests and contract compilation on Python 3.11–3.13 plus the frontend build, with no secrets and no `continue-on-error`. **It has not been run on GitHub.** `ruff format` is enforced for new or rewritten files; older modules are listed as exclusions in `pyproject.toml`.
 
-## Security considerations
-
-* **SSRF:** candidate URLs are untrusted. Only `http(s)` on ports 80/443, no credentials or control
-  characters; every hop incl. redirects (max 3, manual, loop-checked) is re-validated; all resolved addresses
-  must be globally routable (IPv4/IPv6; mapped/6to4/NAT64/Teredo unwrapped); the TCP connect is **pinned to
-  the validated IP** (DNS-rebinding), proxies/`.netrc`/env are ignored; 25 MiB, 20 s/request, 45 s total,
-  image content types only. *Residual:* validation trusts the OS resolver's answers; a public host can still
-  serve hostile content; the guard cannot see through an HTTPS-terminating intermediary you control.
-* **Decoded images:** header dimensions are read before decoding (≤ 16384 px/side, ≤ 50 MP), formats limited
-  to JPEG/PNG/WebP/GIF/BMP, dtype/shape validated, fetch concurrency bounded. Local files named by a search
-  result are refused (only the offline fixture may reference disk paths).
-* **Secrets:** `doctor` shows only "set (N chars)"; RPC URLs are reduced to scheme+host; provider/RPC errors
-  never echo URLs or keys; `PRIVATE_KEY` problems never echo key material. Use a burner key.
-* **Fail-closed verification, deterministic claims, unsupported algorithms rejected** — see above.
-* **Biometric data:** embeddings are never saved or sent; only a SHA-256 commitment is recorded and should be
-  treated as personal data. Crops/downloaded bytes are local evidence you control (`--minimal-evidence`,
-  `purge-evidence`).
-
-## Limitations and responsible use
-
-* Thresholds are model- and data-dependent; the face test has **not** been evaluated here (no licensed face
-  data) and no fairness claim is made — see **[docs/EVALUATION.md](docs/EVALUATION.md)**.
-* pHash misses heavy crops and mirrored copies (measured on synthetic images); the face test may miss small,
-  blurred or angled faces; both can err.
-* Only the largest query face is used; group photos need cropping.
-* Search coverage is whatever the provider indexes; social platforms often block hotlinked images.
-* Use only images you have the right to process, and obtain consent from the people shown. Do not use this to
-  identify, track or profile people. A record is not legal proof of anything.
-* v1-anchored records cannot be checked through the v2 client; the v2 contract is undeployed.
-
-## Troubleshooting
-
-| Symptom | Cause / fix |
+| Document | What is in it |
 |---|---|
-| `this step sends data to a third party and needs your explicit consent` | add `--consent-external-search` (and `--consent-public-upload` if it lists it) — or use the offline demo |
-| `PUBLISH_PROVIDER is 'none'` | pass `--image-url` for a host you control, or set a provider and consent to the upload |
-| exit 6 / `inconclusive` | a required check could not run: see the `error` lines — RPC unreachable, `CONTRACT_ADDRESS` is a v1 registry or has no code, lookup timeout |
-| `does not expose registryVersion()` | the address is an old v1 registry; deploy v2 ([docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)) |
-| `chain id mismatch` | `CHAIN_ID` differs from what the RPC reports |
-| `no face detected` | clearer, front-facing, ≥ ~60 px face; `doctor` confirms models are present |
-| `missing model … / checksum does NOT match` | `python scripts/fetch_models.py` (it re-verifies and replaces bad files) |
-| `no candidate could be evaluated - NOT a negative result` | every candidate was skipped (blocked/failed downloads); retry or raise `MAX_CANDIDATES` |
-| `URL refused by the safety guard` | the candidate pointed at a private/loopback/odd-port address; intended |
-| web UI says it cannot reach the API | start `python -m src.web`; build the frontend with `npm run build` |
+| [docs/PIPELINE.md](docs/PIPELINE.md) | Design of each stage and the decisions behind it |
+| [docs/EVALUATION.md](docs/EVALUATION.md) | Benchmarks, stress tests, thresholds, and every caveat |
+| [docs/RECORD_FORMAT.md](docs/RECORD_FORMAT.md) | Record schema, algorithm labels, anchor modes, bundles, migration |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Registry v2/v3, manual deployment, migration from v1 |
 
-## Historical screenshots and assets
+## What is not done, and what is not claimed
 
-`assets/demo_confirmed_match.png` and `assets/demo_rejected_claim.png` are screenshots of runs made with an
-**earlier build** (older wording such as "CONFIRMED", contract v1 interface). The visible command line in them
-includes `--dry-run`, i.e. **the anchoring in those runs used the simulated local chain, not Base Sepolia**.
-They show other people's photographs from public posts; consider whether keeping them in a public repository
-is appropriate. They are retained as history, not as evidence of current behaviour or of any on-chain
-transaction.
+* **Registry v3 is not deployed.** It is compiled and tested on an in-process EVM; a real deployment is a manual, deliberate step. A plaintext URL ever sent to an old v1 contract stays public.
+* **Face matching is measured on LFW only.** No IJB-C / CFP-FP / AgeDB, no demographic breakdown, one machine. Thresholds are indicative, not calibrated for any population.
+* **Geometric verification is validated on synthetic images.** Real photographs may produce false matches (repeated structure, text, logos).
+* **One search-provider path is verified end to end** (offline fixture); live SerpApi/TinEye calls need your keys and were not exercised here.
+* **The web app is a single-user local tool:** no accounts, no persistence beyond an hour, no hosting setup.
+* **CI has not run on GitHub;** Python 3.10–3.12 were not tested locally.
+* **There is no `LICENSE` file.** The contract carries an MIT SPDX tag, which does not license the rest. Choosing a licence is the owner's decision. Third-party: OpenCV (Apache-2.0); OpenCV Zoo YuNet (MIT) and SFace (Apache-2.0); InsightFace weights (**non-commercial research**); c2pa-python, web3.py and others under their own licences.
+* Use only images you have the right to process and obtain consent from the people shown. Do not use this to identify, track or profile anyone. A record is not legal proof of anything.
 
-<div align="center">
-<img src="assets/demo_confirmed_match.png" alt="Historical screenshot (earlier build, --dry-run): candidate table with confirmed matches" width="49%"/>
-<img src="assets/demo_rejected_claim.png" alt="Historical screenshot (earlier build, --dry-run): all candidates rejected, nothing registered" width="49%"/>
-</div>
+<details>
+<summary><b>Earlier screenshots in <code>assets/</code></b> (kept as history)</summary>
+<br/>
 
-`assets/terminal_card.svg` is a **hand-authored illustration, not a captured session**; its block number and
-transaction hash are decorative and cannot be reproduced, so it is not embedded here.
+`assets/demo_confirmed_match.png` and `assets/demo_rejected_claim.png` come from an **earlier build** (older wording, contract v1 interface). The command visible in them includes `--dry-run`, so **those anchors used the simulated chain, not Base Sepolia**, and they show other people's photographs from public posts — consider whether to keep them in a public repository. `assets/terminal_card.svg` is a hand-authored illustration, not a captured session. None of these are evidence of current behaviour or of any on-chain transaction. The current screenshots above are generated by `scripts/capture_screenshots.py` from the live app.
+</details>
 
-## Licence and attributions
-
-**There is no `LICENSE` file in this repository, and none was created.** `contracts/VerificationRegistry.sol`
-carries an `SPDX-License-Identifier: MIT` tag, but that does not license the rest of the project; the earlier
-README's MIT badge linked to a file that does not exist. Choosing a licence is the owner's decision.
-Third-party: OpenCV (Apache-2.0); OpenCV Zoo YuNet (MIT) and SFace (Apache-2.0) weights, downloaded not
-bundled; web3.py, eth-account, py-solc-x, requests, FastAPI, React, Vite under their own licences. SFace:
-[arXiv 2205.12010](https://arxiv.org/abs/2205.12010).
-
-Further reading: [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) ·
-[OWASP SSRF cheat sheet](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html) ·
-[Web3.py](https://web3py.readthedocs.io/) · [Solidity](https://docs.soliditylang.org/) ·
-[OpenCV](https://docs.opencv.org/) · [Base docs](https://docs.base.org/).
+<div align="center"><sub>FaceProof · local-first image provenance · a record shows what was measured and anchored, not that a claim is true</sub></div>

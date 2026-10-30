@@ -38,3 +38,8 @@ input/*
 /web/node_modules/
 /web/dist/
 .ruff_cache/
+
+# ---- Face-model weights and evaluation data (licences differ; never commit) ----
+/models/insightface/
+/models/_dl/
+/eval_data/

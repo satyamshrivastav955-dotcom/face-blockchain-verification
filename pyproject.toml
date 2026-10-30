@@ -24,8 +24,9 @@ select = ["E", "F", "W", "B"]
 "src/record.py" = ["F401"]
 # FastAPI declares request parts as File(...) / Form(...) defaults by design.
 "src/web/app.py" = ["B008"]
-# Test data tables are clearer on long lines.
+# Test data tables and SVG markup templates are clearer on long lines.
 "tests/*" = ["E501"]
+"scripts/make_readme_assets.py" = ["E501"]
 
 [tool.ruff.format]
 # Pre-existing modules that predate the formatter. Formatting them would rewrite
