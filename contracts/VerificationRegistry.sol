@@ -81,10 +81,12 @@ contract VerificationRegistry {
     error ZeroHash();
 
     /// @notice Interface revision. 2 = URL commitment only, no plaintext URL.
+    ///         3 = v2 plus Merkle-batch anchoring (`registerBatch`). v3 is a strict
+    ///         superset of v2: every v2 call keeps its selector and behaviour.
     /// @dev Absent on v1 deployments, so a call to it reverting is the
     ///      signal that the deployment predates this interface.
     function registryVersion() external pure returns (uint8) {
-        return 2;
+        return 3;
     }
 
     /// @notice Register the verification hash of a provenance claim.
@@ -157,5 +159,90 @@ contract VerificationRegistry {
     {
         Record storage r = _records[dataHash];
         return r.timestamp != 0 && r.urlHash == urlHash;
+    }
+
+    // -----------------------------------------------------------------------
+    // Merkle-batch anchoring (v3)
+    // -----------------------------------------------------------------------
+    //
+    // One transaction registers the root of an RFC 6962 Merkle tree over N
+    // records instead of N transactions. Each record keeps an off-chain
+    // inclusion proof (about log2 N hashes). Leaves are 64 bytes:
+    // dataHash || urlHash, so the proof also binds the URL commitment.
+    // First write wins, exactly like single records; nothing can be changed
+    // or removed afterwards.
+
+    /// @dev Slot 1: submitter (20) + timestamp (6) + blockNumber (6) = 32 bytes;
+    ///      slot 2: size (4) - padded. `size` is informational: the proof, not
+    ///      the contract, ties a leaf to the root.
+    struct Batch {
+        address submitter;
+        uint48 timestamp;
+        uint48 blockNumber;
+        uint32 size;
+    }
+
+    mapping(bytes32 => Batch) private _batches;
+
+    /// @notice Total number of batch roots ever registered.
+    uint256 public totalBatches;
+
+    event BatchRegistered(
+        bytes32 indexed root,
+        address indexed submitter,
+        uint32 size,
+        uint48 timestamp
+    );
+
+    /// @notice A batch with this root already exists and cannot be replaced.
+    error BatchAlreadyRegistered(bytes32 root, uint48 registeredAt, address submitter);
+
+    /// @notice A batch must contain at least one record.
+    error EmptyBatch();
+
+    /// @notice Register the Merkle root of a batch of verification records.
+    /// @param root RFC 6962 Merkle root over the batch's 64-byte leaves.
+    /// @param size Number of records the root covers (>= 1).
+    function registerBatch(bytes32 root, uint32 size)
+        external
+        returns (uint48 timestamp)
+    {
+        if (root == bytes32(0)) revert ZeroHash();
+        if (size == 0) revert EmptyBatch();
+
+        Batch storage existing = _batches[root];
+        if (existing.timestamp != 0) {
+            revert BatchAlreadyRegistered(root, existing.timestamp, existing.submitter);
+        }
+
+        timestamp = uint48(block.timestamp);
+        _batches[root] = Batch({
+            submitter: msg.sender,
+            timestamp: timestamp,
+            blockNumber: uint48(block.number),
+            size: size
+        });
+
+        unchecked {
+            totalBatches += 1;
+        }
+
+        emit BatchRegistered(root, msg.sender, size, timestamp);
+    }
+
+    /// @notice Look up a batch root.
+    function verifyBatch(bytes32 root)
+        external
+        view
+        returns (
+            bool exists,
+            address submitter,
+            uint48 timestamp,
+            uint48 blockNumber,
+            uint32 size
+        )
+    {
+        Batch storage b = _batches[root];
+        return (b.timestamp != 0, b.submitter, b.timestamp, b.blockNumber, b.size);
     }
 }

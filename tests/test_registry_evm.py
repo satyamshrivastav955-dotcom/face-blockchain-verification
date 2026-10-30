@@ -151,11 +151,14 @@ class TestRegistryBehaviour:
             "matchesUrlHash",
             "totalRecords",
             "registryVersion",
+            "registerBatch",
+            "verifyBatch",
+            "totalBatches",
         }
 
     def test_registry_version(self, deployed):
         _, _, client = deployed
-        assert client.check_compatibility() == REGISTRY_VERSION == 2
+        assert client.check_compatibility() == REGISTRY_VERSION == 3
 
 
 class TestNoPlaintextUrlOnChain:
@@ -350,3 +353,132 @@ class TestVerifyThroughTheRealClient:
         assert code == 6
         assert report["verdict"] == "inconclusive"
         assert report["checks"]["chain_anchor"]["status"] == "error"
+
+
+ROOT_A = "0x" + "c1" * 32
+ROOT_B = "0x" + "d2" * 32
+
+
+class TestMerkleBatches:
+    """Registry v3: one transaction anchors a whole batch."""
+
+    def test_register_and_lookup(self, deployed):
+        _, _, client = deployed
+        anchor = client.register_batch(ROOT_A, 40)
+        assert anchor.tx_hash.startswith("0x") and anchor.registry_version == 3
+        batch = client.lookup_batch(ROOT_A)
+        assert batch.exists and batch.size == 40
+        assert batch.submitter == client.account.address
+        assert batch.block_number == anchor.block_number and batch.timestamp == anchor.block_timestamp
+        assert client.contract.functions.totalBatches().call() == 1
+
+    def test_unknown_root(self, deployed):
+        _, _, client = deployed
+        assert client.lookup_batch(ROOT_B).exists is False
+
+    def test_first_write_wins_and_nothing_changes(self, deployed):
+        _, _, client = deployed
+        client.register_batch(ROOT_A, 5)
+        with pytest.raises(ChainError) as excinfo:
+            client.register_batch(ROOT_A, 999)
+        assert "already anchored" in str(excinfo.value)
+        assert client.lookup_batch(ROOT_A).size == 5  # untouched
+
+    def test_zero_root_and_empty_batch_are_rejected(self, deployed):
+        _, _, client = deployed
+        with pytest.raises(ChainError):
+            client.register_batch("0x" + "00" * 32, 1)
+        with pytest.raises(ChainError):
+            client.register_batch(ROOT_B, 0)
+        with pytest.raises(ChainError):
+            client.register_batch(ROOT_B, 2**32)
+
+    def test_event_carries_only_the_root_size_and_time(self, deployed):
+        _, _, client = deployed
+        anchor = client.register_batch(ROOT_A, 7)
+        receipt = client.w3.eth.get_transaction_receipt(anchor.tx_hash)
+        assert len(receipt["logs"]) == 1
+        calldata = bytes.fromhex(client.w3.eth.get_transaction(anchor.tx_hash)["input"].hex().removeprefix("0x"))
+        assert len(calldata) == 4 + 32 + 32  # selector + root + size, nothing else
+
+    def test_single_and_batch_records_coexist(self, deployed):
+        _, _, client = deployed
+        client.register(HASH_A, URL_A)
+        client.register_batch(ROOT_A, 3)
+        assert client.lookup(HASH_A).exists and client.lookup_batch(ROOT_A).exists
+        assert client.lookup_batch(HASH_A).exists is False  # namespaces do not collide
+
+    def test_gas_is_amortised_across_the_batch(self, deployed):
+        """The reason batching exists: one transaction's gas, however many records it covers."""
+        _, _, client = deployed
+        # Warm both counters first: the very first write to a zero storage slot costs ~17k more.
+        client.register(HASH_B, URL_B)
+        client.register_batch("0x" + "a0" * 32, 1)
+        single = client.register(HASH_A, URL_A).gas_used
+        small = client.register_batch(ROOT_A, 1).gas_used
+        large = client.register_batch(ROOT_B, 1000).gas_used
+        assert abs(large - small) < 2_000  # batch size does not change the cost
+        assert large / 1000 < single / 50  # more than 50x cheaper per record at 1000 records
+        assert large < 2 * single  # one batch costs about one single registration
+        print(f"GAS single={single} batch(1)={small} batch(1000)={large} per-record@1000={large / 1000:.1f}")
+
+    def test_a_v2_registry_is_accepted_but_cannot_batch(self, chain):
+        from src.blockchain.client import IncompatibleContractError
+
+        tester, settings = chain
+        v2_source = """
+        // SPDX-License-Identifier: MIT
+        pragma solidity ^0.8.20;
+        contract VerificationRegistry {
+            function registryVersion() external pure returns (uint8) { return 2; }
+        }
+        """
+        compiled = solcx.compile_source(v2_source, output_values=["abi", "bin"], solc_version=client_mod.SOLC_VERSION)
+        _, iface = next(iter(compiled.items()))
+        w3 = Web3(EthereumTesterProvider(tester))
+        tx = (
+            w3.eth.contract(abi=iface["abi"], bytecode=iface["bin"])
+            .constructor()
+            .transact({"from": tester.get_accounts()[1]})
+        )
+        settings.contract_address = w3.eth.get_transaction_receipt(tx)["contractAddress"]
+        client = EvmChainClient(settings)  # v2 is still compatible for single records
+        assert client.registry_version == 2
+        with pytest.raises(IncompatibleContractError) as excinfo:
+            client.register_batch(ROOT_A, 1)
+        assert "needs v3" in str(excinfo.value)
+
+    def test_end_to_end_verify_through_the_real_client(self, deployed, tmp_path):
+        from src.blockchain.client import url_commitment
+        from src.evidence.batch import build_batch, merkle_block
+        from src.evidence.record import attach_anchor, build_payload, save_record, seal
+        from src.pipeline import run_verify
+        from src.ui import Console
+
+        _, settings, client = deployed
+        urls = [f"https://x.com/u/status/{i}" for i in range(6)]
+        records = []
+        for i, url in enumerate(urls):
+            payload = build_payload(
+                source_image={"filename": "q.png", "sha256": f"{i:064x}"},
+                face={"engine": "x"},
+                search={"provider": "x"},
+                match={"matched_url": url, "decision_rule": "confirmed_face_match"},
+                created_at="2026-01-01T00:00:00Z",
+            )
+            records.append(seal(payload))
+        plan = build_batch(
+            [(r["integrity"]["verification_hash"], url_commitment(u)) for r, u in zip(records, urls, strict=True)]
+        )
+        anchor = client.register_batch(plan.root, plan.size)
+        settings.private_key = ""
+        for i, record in enumerate(records):
+            block = anchor.to_json()
+            block.pop("url_commitment", None)
+            block.update({"mode": "merkle_batch", "merkle": merkle_block(plan, i)})
+            attach_anchor(record, block)
+            path = save_record(record, tmp_path / f"r{i}.json")
+            report: dict = {}
+            code = run_verify(settings, path, console=Console(force_ascii=True), report=report)
+            assert code == 0 and report["verdict"] == "verified", report
+            assert report["chain"]["batch_size"] == 6 and report["simulated"] is False

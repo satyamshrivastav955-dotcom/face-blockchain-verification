@@ -1,4 +1,4 @@
-# Manual deployment and migration of the registry (interface v2)
+# Manual deployment and migration of the registry (interface v3; v2-compatible)
 
 > **Nothing in this repository has deployed a contract, sent a transaction or changed `.env`.** The v2
 > contract was compiled and executed only on an in-process EVM (`tests/test_registry_evm.py`). Everything
@@ -23,6 +23,27 @@ has the new privacy property.
 `EvmChainClient` calls `registryVersion()` when it connects. An address that has no code, or whose contract
 lacks that function (a v1 registry), raises `IncompatibleContractError`; `verify` then reports
 **inconclusive (exit 6)** rather than "not anchored" or success.
+
+## Registry v3: Merkle-batch anchoring
+
+v3 is a strict superset of v2: every v2 call keeps its selector and behaviour, and the client still
+works with a deployed v2 contract (batching needs v3). It adds one transaction that registers the
+root of an RFC 6962 Merkle tree over N records:
+
+| | v2 | v3 adds |
+|---|---|---|
+| Write | `register(bytes32 dataHash, bytes32 urlHash)` | `registerBatch(bytes32 root, uint32 size)` |
+| Read | `verify(dataHash)`, `matchesUrlHash` | `verifyBatch(root)`, `totalBatches()` |
+| Event | `Registered(dataHash, submitter, urlHash, timestamp)` | `BatchRegistered(root, submitter, size, timestamp)` |
+| Version | `registryVersion() == 2` | `registryVersion() == 3` |
+
+Leaves are `verification_hash || keccak256(matched_url)` (64 bytes), so an inclusion proof also binds the
+URL commitment. `register --anchor-mode batch` seals records without anchoring; `anchor-batch <files>`
+then registers one root and writes every record its proof. Same trust model as single anchoring (a hash
+was registered at a time); the difference is cost: gas for one transaction regardless of N
+(`tests/test_registry_evm.py::TestMerkleBatches::test_gas_is_amortised_across_the_batch`), and proofs of
+about log2(N) hashes. A record is verified by recomputing its leaf from its own data, checking the proof
+against the root, then looking the root up on-chain.
 
 ## Historical records
 
