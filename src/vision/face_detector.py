@@ -38,6 +38,8 @@ __all__ = [
     "NoFaceError",
     "cosine_similarity",
     "embedding_fingerprint",
+    "prominence",
+    "select_primary",
     "DET_MODEL_FILE",
     "REC_MODEL_FILE",
     "MODEL_SHA256",
@@ -137,6 +139,9 @@ class OpenCVFaceEngine:
     """YuNet detection + SFace embedding."""
 
     name = "opencv-yunet+sface"
+    commercial_use = True  # YuNet MIT, SFace Apache-2.0 (OpenCV Zoo)
+    model_license = "YuNet: MIT; SFace: Apache-2.0 (OpenCV Zoo)"
+    default_threshold = 0.363  # OpenCV's documented SFace example value
 
     def __init__(
         self,
@@ -277,6 +282,9 @@ class StubFaceEngine:
     """
 
     name = "stub-test-only"
+    commercial_use = False
+    model_license = "none (test-only stub, not a model)"
+    default_threshold = 0.363
 
     def __init__(self) -> None:
         self.embedding_dim = 128
@@ -335,3 +343,35 @@ def best_similarity(
         if score > best_score:
             best_score, best_face = score, face
     return (best_score if best_face is not None else 0.0), best_face
+
+
+def prominence(face: Face, image_shape: tuple[int, ...]) -> float:
+    """How likely *face* is the photograph's subject: size weighted by closeness to the centre.
+
+    ``sqrt(area) * (1 - 0.5 * d)`` where ``d`` is the distance from the box centre to the image
+    centre as a fraction of the half-diagonal. Size alone picks a large bystander over a smaller
+    centred subject (measured on LFW, docs/EVALUATION.md); centrality alone picks a tiny face in the
+    middle of a group. Ties and near-ties are surfaced by :func:`select_primary` so the caller can warn.
+    """
+    h, w = image_shape[:2]
+    x, y, bw, bh = face.bbox
+    half_diag = (h * h + w * w) ** 0.5 / 2
+    d = (((x + bw / 2) - w / 2) ** 2 + ((y + bh / 2) - h / 2) ** 2) ** 0.5 / half_diag
+    return float((max(bw, 1) * max(bh, 1)) ** 0.5 * (1.0 - 0.5 * min(1.0, d)))
+
+
+def select_primary(
+    faces: Sequence[Face], image_shape: tuple[int, ...], *, ambiguity: float = 0.6
+) -> tuple[Face | None, bool]:
+    """Pick the subject face among embeddable *faces*; second value is True if the choice is ambiguous.
+
+    Ambiguous means another face scores at least *ambiguity* times the winner's prominence - e.g. a
+    group photo - and the user should be told which face was used.
+    """
+    usable = [f for f in faces if f.embedding is not None]
+    if not usable:
+        return None, False
+    ranked = sorted(usable, key=lambda f: prominence(f, image_shape), reverse=True)
+    best = prominence(ranked[0], image_shape)
+    ambiguous = len(ranked) > 1 and best > 0 and prominence(ranked[1], image_shape) >= ambiguity * best
+    return ranked[0], ambiguous

@@ -37,7 +37,7 @@ MAX_REDIRECTS = 3
 # Decoded-image bounds: a small compressed file can expand to gigabytes.
 MAX_IMAGE_DIMENSION = 16384
 MAX_IMAGE_PIXELS = 50_000_000
-MAX_CONCURRENT_FETCHES = 2
+MAX_CONCURRENT_FETCHES = 6
 USER_AGENT = (
     "face-blockchain-verification/1.0 (academic image-provenance research; "
     "contact via repository)"
