@@ -1,0 +1,19 @@
+# Normalise text to LF in the repository and the working tree.
+* text=auto eol=lf
+
+# Binary assets: never diff or convert.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.mp4 binary
+*.webm binary
+*.onnx binary
+*.zip binary
+*.docx binary
+
+# Generated or vendored: keep out of language statistics and diffs.
+web/package-lock.json -diff linguist-generated
+constraints.txt linguist-generated
+docs/results/*.json linguist-generated
