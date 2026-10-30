@@ -46,6 +46,16 @@ MIN_RAW_MATCHES = 12
 
 @dataclass
 class GeoResult:
+    """Result of a geometric matching attempt between the query and one candidate image.
+
+    Attributes:
+        inliers: Number of feature-match pairs consistent with the estimated homography.
+        matches: Total ratio-test-passing feature pairs submitted to RANSAC.
+        mirrored: True when the candidate was horizontally flipped before matching.
+        passed: True when both :data:`MIN_INLIERS` and :data:`MIN_INLIER_RATIO` are met.
+        reason: Human-readable one-line summary of why the attempt passed or failed.
+    """
+
     inliers: int = 0
     matches: int = 0
     mirrored: bool = False

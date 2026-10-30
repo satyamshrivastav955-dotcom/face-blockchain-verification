@@ -40,10 +40,12 @@ EMPTY_ROOT = hashlib.sha256(b"").digest()
 
 
 def leaf_hash(data: bytes) -> bytes:
+    """RFC 6962 leaf hash: SHA-256(0x00 || data). Domain-separates leaves from interior nodes."""
     return hashlib.sha256(b"\x00" + data).digest()
 
 
 def node_hash(left: bytes, right: bytes) -> bytes:
+    """RFC 6962 node hash: SHA-256(0x01 || left || right). Domain-separates interior nodes from leaves."""
     return hashlib.sha256(b"\x01" + left + right).digest()
 
 

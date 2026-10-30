@@ -76,6 +76,15 @@ class EngineSpec:
     """Static description of one engine configuration."""
 
     def __init__(self, name, det, rec, embedding_dim, default_threshold, description):
+        """
+        Args:
+            name: Canonical engine key (e.g. ``"arcface-r50"``).
+            det: Filename of the SCRFD detection ONNX model.
+            rec: Filename of the ArcFace recognition ONNX model.
+            embedding_dim: Dimensionality of the L2-normalised embedding vector.
+            default_threshold: Benchmarked cosine threshold (FAR ~1e-3 on LFW).
+            description: Human-readable one-line description.
+        """
         self.name = name
         self.det = det
         self.rec = rec
@@ -265,6 +274,18 @@ class OnnxFaceEngine:
         min_face_px: int = 12,
         fallback_thresh: float = 0.25,
     ) -> None:
+        """
+        Args:
+            models_dir: Directory containing the ``insightface/`` model sub-folder.
+            spec_name: Engine variant — ``"arcface-r50"`` or ``"arcface-r100"``.
+            providers: ONNX Runtime execution providers (default: CUDA then CPU).
+            det_size: Detection network input resolution ``(width, height)``.
+            det_thresh: Primary SCRFD confidence threshold.
+            nms_thresh: IoU threshold for NMS.
+            flip_tta: Average embeddings from the original and horizontally-flipped crop.
+            min_face_px: Discard detections smaller than this many pixels on a side.
+            fallback_thresh: Permissive threshold tried when nothing passes *det_thresh*.
+        """
         if spec_name not in ENGINE_SPECS:
             raise ModelMissingError(f"unknown engine {spec_name!r}; choose from {', '.join(ENGINE_SPECS)}")
         self.spec = ENGINE_SPECS[spec_name]

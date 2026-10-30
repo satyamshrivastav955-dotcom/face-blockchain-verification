@@ -38,10 +38,11 @@ LEAF_DESCRIPTION = "RFC6962 leaf over verification_hash||keccak256(matched_url)"
 
 
 class BatchError(ValueError):
-    pass
+    """Raised when a batch is malformed (duplicate leaves, bad hex, out-of-range proof)."""
 
 
 def _bytes32(hex_str: str, what: str) -> bytes:
+    """Parse a 32-byte value from a 0x-prefixed or plain hex string; raise :class:`BatchError` on failure."""
     text = hex_str[2:] if hex_str.startswith("0x") else hex_str
     try:
         raw = bytes.fromhex(text)
@@ -53,6 +54,12 @@ def _bytes32(hex_str: str, what: str) -> bytes:
 
 
 def leaf_data(verification_hash: str, url_commit: str) -> bytes:
+    """Concatenate the two 32-byte values that form an RFC 6962 leaf in a batch.
+
+    The leaf is ``verification_hash (32 bytes) || keccak256(matched_url) (32 bytes)``.
+    Both halves are recomputed from the record at verification time; the stored
+    ``merkle`` block is never trusted as the canonical source for them.
+    """
     return _bytes32(verification_hash, "verification_hash") + _bytes32(url_commit, "url_commitment")
 
 
@@ -77,6 +84,7 @@ def build_batch(entries: list[tuple[str, str]]) -> BatchPlan:
 
 
 def merkle_block(plan: BatchPlan, index: int) -> dict[str, Any]:
+    """Return the ``merkle`` sub-dict to embed in a record's ``anchor`` at *index* in *plan*."""
     return {
         "root": plan.root,
         "index": index,
