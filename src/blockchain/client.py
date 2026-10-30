@@ -41,6 +41,8 @@ __all__ = [
     "ChainError",
     "IncompatibleContractError",
     "REGISTRY_VERSION",
+    "MIN_REGISTRY_VERSION",
+    "BatchRecord",
     "url_commitment",
     "AnchorResult",
     "ChainRecord",
@@ -58,9 +60,12 @@ BUILD_DIR = PROJECT_ROOT / "contracts" / "build"
 ARTIFACT_PATH = BUILD_DIR / f"{CONTRACT_NAME}.json"
 SOLC_VERSION = "0.8.24"
 
-# Interface revision this client speaks. v1 took the plaintext URL as calldata
-# and emitted it in an event; v2 takes only a keccak256 commitment.
-REGISTRY_VERSION = 2
+# Interface revisions. v1 took the plaintext URL as calldata and emitted it in an
+# event; v2 takes only a keccak256 commitment; v3 is a strict superset of v2 that
+# adds Merkle-batch anchoring. The client works with v2 and v3 contracts; batch
+# operations need v3.
+REGISTRY_VERSION = 3
+MIN_REGISTRY_VERSION = 2
 
 
 class ChainError(RuntimeError):
@@ -138,6 +143,17 @@ class ChainRecord:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class BatchRecord:
+    """What the chain says about a Merkle batch root."""
+
+    exists: bool
+    submitter: str = ""
+    timestamp: int = 0
+    block_number: int = 0
+    size: int = 0
+
+
 class ChainClient(Protocol):
     network: str
     chain_id: int
@@ -146,6 +162,8 @@ class ChainClient(Protocol):
     def register(self, data_hash: str, source_url: str) -> AnchorResult: ...
     def lookup(self, data_hash: str) -> ChainRecord: ...
     def matches_url(self, data_hash: str, source_url: str) -> bool: ...
+    def register_batch(self, root: str, size: int) -> AnchorResult: ...
+    def lookup_batch(self, root: str) -> BatchRecord: ...
     def describe(self) -> dict[str, Any]: ...
 
 
@@ -347,6 +365,7 @@ class EvmChainClient:
             self.account = self._load_account()
 
         self.contract = None
+        self.registry_version = 0  # set by check_compatibility() once a contract is attached
         if settings.contract_address:
             if not self.w3.is_address(settings.contract_address):
                 raise ChainError("CONTRACT_ADDRESS is not a valid address")
@@ -382,10 +401,12 @@ class EvmChainClient:
                 "Records anchored there cannot be checked through this build's v2 "
                 "interface; deploy the v2 contract manually (see README)."
             ) from exc
-        if version != REGISTRY_VERSION:
+        if not MIN_REGISTRY_VERSION <= version <= REGISTRY_VERSION:
             raise IncompatibleContractError(
-                f"registry interface version {version} is not supported (expected {REGISTRY_VERSION})"
+                f"registry interface version {version} is not supported "
+                f"(this build supports {MIN_REGISTRY_VERSION}-{REGISTRY_VERSION})"
             )
+        self.registry_version = version
         return version
 
     def _install_poa_middleware(self) -> None:
@@ -530,6 +551,7 @@ class EvmChainClient:
             gas_used=int(receipt.get("gasUsed", 0)),
             explorer_url=self.settings.tx_url(_hex0x(receipt["transactionHash"])),
             url_commitment=commitment,
+            registry_version=self.registry_version,
         )
 
     def lookup(self, data_hash: str) -> ChainRecord:
@@ -560,6 +582,71 @@ class EvmChainClient:
         except Exception as exc:  # noqa: BLE001
             raise ChainError(f"URL commitment check failed: {_short(exc)}") from exc
 
+    def _require_batch_support(self):
+        contract = self._require_contract()
+        if self.registry_version < 3:
+            raise IncompatibleContractError(
+                f"the contract at {contract.address} is registry v{self.registry_version}; Merkle-batch "
+                "anchoring needs v3. Deploy the v3 contract manually (docs/DEPLOYMENT.md)."
+            )
+        return contract
+
+    def register_batch(self, root: str, size: int) -> AnchorResult:
+        """Anchor a Merkle root covering *size* records in a single transaction."""
+        contract = self._require_batch_support()
+        if self.account is None:
+            raise ChainError("a signer (PRIVATE_KEY) is required to register")
+        if not isinstance(size, int) or not 1 <= size < 2**32:
+            raise ChainError("batch size must be between 1 and 2**32 - 1")
+        raw_root = self._to_bytes32(root)
+        if self.lookup_batch(root).exists:
+            raise ChainError(_ALREADY_ANCHORED.replace("verification hash", "batch root"))
+        function = contract.functions.registerBatch(raw_root, size)
+        try:
+            function.call({"from": self.account.address})
+        except Exception as exc:  # noqa: BLE001
+            raise ChainError(f"the transaction would revert: {_short(exc)}") from exc
+        try:
+            tx = function.build_transaction(
+                {
+                    "from": self.account.address,
+                    "nonce": self.w3.eth.get_transaction_count(self.account.address),
+                    "chainId": self.chain_id,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise ChainError(f"could not build the transaction: {_short(exc)}") from exc
+        if "gas" in tx:
+            tx["gas"] = int(tx["gas"] * 1.25)
+        receipt = self._send(tx)
+        try:
+            block = self.w3.eth.get_block(receipt["blockNumber"])
+        except Exception as exc:  # noqa: BLE001
+            raise ChainError(f"could not read the anchoring block: {_short(exc)}") from exc
+        tx_hash = _hex0x(receipt["transactionHash"])
+        return AnchorResult(
+            data_hash=root,
+            tx_hash=tx_hash,
+            block_number=int(receipt["blockNumber"]),
+            block_timestamp=int(block["timestamp"]),
+            contract_address=contract.address,
+            submitter=self.account.address,
+            chain_id=self.chain_id,
+            network=self.network,
+            gas_used=int(receipt.get("gasUsed", 0)),
+            explorer_url=self.settings.tx_url(tx_hash),
+            registry_version=self.registry_version,
+        )
+
+    def lookup_batch(self, root: str) -> BatchRecord:
+        contract = self._require_batch_support()
+        key = self._to_bytes32(root)
+        try:
+            exists, submitter, timestamp, block_number, size = contract.functions.verifyBatch(key).call()
+        except Exception as exc:  # noqa: BLE001
+            raise ChainError(f"batch lookup failed: {_short(exc)}") from exc
+        return BatchRecord(bool(exists), str(submitter), int(timestamp), int(block_number), int(size))
+
     def describe(self) -> dict[str, Any]:
         return {
             "network": self.network,
@@ -567,7 +654,7 @@ class EvmChainClient:
             "rpc_url": _redact_url(self.settings.rpc_url),
             "contract_address": self.settings.contract_address,
             "signer": self.account.address if self.account else "",
-            "registry_version": REGISTRY_VERSION,
+            "registry_version": self.registry_version or REGISTRY_VERSION,
             "simulated": False,
         }
 
@@ -609,6 +696,8 @@ class MockChainClient:
             self._state["records"] = {}
         if not isinstance(self._state.get("head"), int):
             self._state["head"] = 0
+        if not isinstance(self._state.get("batches"), dict):
+            self._state["batches"] = {}
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -652,6 +741,49 @@ class MockChainClient:
             explorer_url="",
             simulated=True,
             url_commitment=commitment,
+        )
+
+    def register_batch(self, root: str, size: int) -> AnchorResult:
+        import time
+
+        key = root.lower()
+        if not isinstance(size, int) or not 1 <= size < 2**32:
+            raise ChainError("batch size must be between 1 and 2**32 - 1")
+        if key in self._state["batches"]:
+            raise ChainError(
+                "this batch root is already anchored in the simulated chain "
+                f"(first-write-wins). Delete {self.path.name} to reset the simulation."
+            )
+        self._state["head"] = int(self._state["head"]) + 1
+        now = int(time.time())
+        submitter = "0x" + "11" * 20
+        entry = {
+            "root": key,
+            "size": size,
+            "submitter": submitter,
+            "timestamp": now,
+            "block_number": self._state["head"],
+        }
+        self._state["batches"][key] = entry
+        self._save()
+        return AnchorResult(
+            data_hash=root,
+            tx_hash="0x" + sha256_bytes(f"batch{key}{now}".encode())[:64],
+            block_number=entry["block_number"],
+            block_timestamp=now,
+            contract_address="0x" + "00" * 19 + "01",
+            submitter=submitter,
+            chain_id=self.chain_id,
+            network=self.network,
+            simulated=True,
+        )
+
+    def lookup_batch(self, root: str) -> BatchRecord:
+        entry = self._state["batches"].get(root.lower())
+        if not entry:
+            return BatchRecord(exists=False)
+        return BatchRecord(
+            True, entry["submitter"], int(entry["timestamp"]), int(entry["block_number"]), int(entry["size"])
         )
 
     def lookup(self, data_hash: str) -> ChainRecord:

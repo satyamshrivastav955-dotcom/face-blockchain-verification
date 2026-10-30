@@ -39,6 +39,17 @@ It is a **commitment**, not anonymisation: it does not reveal the vector, but an
 embedding can confirm it. Treat the record as personal data. No raw embedding is saved in the record, the
 evidence bundle or on-chain.
 
+## Anchor modes
+
+* `single` (default): `anchor` holds one transaction that registered this record's hash and URL
+  commitment (`url_commitment` field).
+* `merkle_batch`: `anchor.mode == "merkle_batch"`; while pending it is `{"mode": "merkle_batch",
+  "status": "pending"}`. After `anchor-batch` it also holds `merkle: {root, index, size, proof[], leaf}` and
+  the batch transaction's fields. Verification adds a `merkle_inclusion` check and reports
+  `anchor_mode: "merkle_batch"`. See docs/DEPLOYMENT.md.
+
+Neither mode changes the hashed payload, and neither is part of it.
+
 ## Canonicalization: what is and is not claimed
 
 `src/evidence/hashing.py` is a **restricted profile of RFC 8785 (JCS)**, not a full implementation.
