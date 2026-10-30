@@ -1,0 +1,240 @@
+{
+  "protocol": "LFW 10-fold, raw images, full detect-align-embed path; headline numbers use the production prominence face-selection rule",
+  "pairs": 6000,
+  "environment": {
+    "python": "3.13.13",
+    "opencv": "5.0.0",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "processor": "Intel64 Family 6 Model 191 Stepping 2, GenuineIntel",
+    "onnxruntime": "1.23.2",
+    "ort_providers": [
+      "TensorrtExecutionProvider",
+      "CUDAExecutionProvider",
+      "CPUExecutionProvider"
+    ]
+  },
+  "engines": {
+    "opencv": {
+      "accuracy_10fold_mean": 0.9931666666666665,
+      "accuracy_10fold_std": 0.0036094013046179705,
+      "best_threshold_all_pairs": 0.30891662048758883,
+      "pairs_with_enrollment_failure": 0,
+      "images": 7701,
+      "images_without_face": 0,
+      "images_with_multiple_faces": 1552,
+      "failure_to_enroll_rate_images": 0.0,
+      "wall_seconds_total": 331.8422369,
+      "selection_rule_comparison": {
+        "largest": {
+          "accuracy_10fold_mean": 0.9896666666666668,
+          "accuracy_10fold_std": 0.003480102169636851,
+          "auc": 0.9953796666666668,
+          "eer": 0.013333333333333322
+        },
+        "center": {
+          "accuracy_10fold_mean": 0.9933333333333332,
+          "accuracy_10fold_std": 0.0038729833462074394,
+          "auc": 0.998767,
+          "eer": 0.008000000000000004
+        },
+        "prominence": {
+          "accuracy_10fold_mean": 0.9931666666666665,
+          "accuracy_10fold_std": 0.0036094013046179705,
+          "auc": 0.9987127777777778,
+          "eer": 0.008333333333333318
+        }
+      },
+      "auc": 0.9987127777777778,
+      "eer": 0.008333333333333318,
+      "threshold_at_far_0.01": 0.29309400121611845,
+      "tar_at_far_0.01": 0.9923333333333333,
+      "threshold_at_far_0.001": 0.3591564240867689,
+      "tar_at_far_0.001": 0.9846666666666667,
+      "stress_at_clean_threshold": {
+        "downscale 5x": {
+          "accuracy": 0.9433333333333334,
+          "failure_to_enroll": 0.0033333333333333335
+        },
+        "jpeg q12": {
+          "accuracy": 0.9866666666666667,
+          "failure_to_enroll": 0.0
+        },
+        "blur sigma 3": {
+          "accuracy": 0.9833333333333333,
+          "failure_to_enroll": 0.0
+        },
+        "low light x0.3": {
+          "accuracy": 0.9916666666666667,
+          "failure_to_enroll": 0.0
+        },
+        "lower-face occlusion": {
+          "accuracy": 0.9766666666666667,
+          "failure_to_enroll": 0.0
+        },
+        "rotate 30 deg": {
+          "accuracy": 0.9016666666666666,
+          "failure_to_enroll": 0.0
+        }
+      },
+      "timing_250px": {
+        "p50_ms": 32.25879999990866,
+        "p95_ms": 36.01370000069437,
+        "provider": "cpu (OpenCV DNN)"
+      },
+      "timing_1280px": {
+        "p50_ms": 169.2523000001529,
+        "p95_ms": 280.2225000014005,
+        "provider": "cpu (OpenCV DNN)"
+      },
+      "licence": "YuNet: MIT; SFace: Apache-2.0 (OpenCV Zoo)"
+    },
+    "arcface-r50": {
+      "accuracy_10fold_mean": 0.9964999999999999,
+      "accuracy_10fold_std": 0.002929732638541141,
+      "best_threshold_all_pairs": 0.2528596122665866,
+      "pairs_with_enrollment_failure": 3,
+      "images": 7701,
+      "images_without_face": 2,
+      "images_with_multiple_faces": 1527,
+      "failure_to_enroll_rate_images": 0.0002597065316192702,
+      "wall_seconds_total": 255.90220220000083,
+      "selection_rule_comparison": {
+        "largest": {
+          "accuracy_10fold_mean": 0.9728333333333333,
+          "accuracy_10fold_std": 0.005727613425813188,
+          "auc": 0.977893,
+          "eer": 0.04733333333333334
+        },
+        "center": {
+          "accuracy_10fold_mean": 0.9976666666666667,
+          "accuracy_10fold_std": 0.0018559214542766668,
+          "auc": 0.9980762222222224,
+          "eer": 0.004000000000000002
+        },
+        "prominence": {
+          "accuracy_10fold_mean": 0.9964999999999999,
+          "accuracy_10fold_std": 0.002929732638541141,
+          "auc": 0.9969054444444444,
+          "eer": 0.006000000000000003
+        }
+      },
+      "auc": 0.9969054444444444,
+      "eer": 0.006000000000000003,
+      "threshold_at_far_0.01": 0.14169849849891414,
+      "tar_at_far_0.01": 0.994,
+      "threshold_at_far_0.001": 0.22068132322247724,
+      "tar_at_far_0.001": 0.9933333333333333,
+      "stress_at_clean_threshold": {
+        "downscale 5x": {
+          "accuracy": 0.995,
+          "failure_to_enroll": 0.0
+        },
+        "jpeg q12": {
+          "accuracy": 0.9966666666666667,
+          "failure_to_enroll": 0.0
+        },
+        "blur sigma 3": {
+          "accuracy": 0.9933333333333333,
+          "failure_to_enroll": 0.0
+        },
+        "low light x0.3": {
+          "accuracy": 0.995,
+          "failure_to_enroll": 0.0
+        },
+        "lower-face occlusion": {
+          "accuracy": 0.9916666666666667,
+          "failure_to_enroll": 0.0
+        },
+        "rotate 30 deg": {
+          "accuracy": 0.9966666666666667,
+          "failure_to_enroll": 0.0
+        }
+      },
+      "timing_250px": {
+        "p50_ms": 22.899799998413073,
+        "p95_ms": 23.61150000069756,
+        "provider": "CUDAExecutionProvider"
+      },
+      "timing_1280px": {
+        "p50_ms": 21.478599999682046,
+        "p95_ms": 22.356999999828986,
+        "provider": "CUDAExecutionProvider"
+      },
+      "licence": "InsightFace pretrained weights: non-commercial research use only; training-data terms vary (see https://github.com/deepinsight/insightface)"
+    },
+    "arcface-r100": {
+      "accuracy_10fold_mean": 0.9963333333333333,
+      "accuracy_10fold_std": 0.0028674417556808617,
+      "best_threshold_all_pairs": 0.29709771874883695,
+      "pairs_with_enrollment_failure": 3,
+      "images": 7701,
+      "images_without_face": 2,
+      "images_with_multiple_faces": 1527,
+      "failure_to_enroll_rate_images": 0.0002597065316192702,
+      "wall_seconds_total": 400.0888766999997,
+      "selection_rule_comparison": {
+        "largest": {
+          "accuracy_10fold_mean": 0.9723333333333333,
+          "accuracy_10fold_std": 0.005972157622389642,
+          "auc": 0.9758898888888888,
+          "eer": 0.04700000000000002
+        },
+        "center": {
+          "accuracy_10fold_mean": 0.9974999999999999,
+          "accuracy_10fold_std": 0.0017078251276599237,
+          "auc": 0.9979852222222223,
+          "eer": 0.004333333333333317
+        },
+        "prominence": {
+          "accuracy_10fold_mean": 0.9963333333333333,
+          "accuracy_10fold_std": 0.0028674417556808617,
+          "auc": 0.9967237777777778,
+          "eer": 0.006666666666666689
+        }
+      },
+      "auc": 0.9967237777777778,
+      "eer": 0.006666666666666689,
+      "threshold_at_far_0.01": 0.15782305770944005,
+      "tar_at_far_0.01": 0.9933333333333333,
+      "threshold_at_far_0.001": 0.2507625356557323,
+      "tar_at_far_0.001": 0.993,
+      "stress_at_clean_threshold": {
+        "downscale 5x": {
+          "accuracy": 0.9933333333333333,
+          "failure_to_enroll": 0.0
+        },
+        "jpeg q12": {
+          "accuracy": 0.995,
+          "failure_to_enroll": 0.0
+        },
+        "blur sigma 3": {
+          "accuracy": 0.9933333333333333,
+          "failure_to_enroll": 0.0
+        },
+        "low light x0.3": {
+          "accuracy": 0.995,
+          "failure_to_enroll": 0.0
+        },
+        "lower-face occlusion": {
+          "accuracy": 0.99,
+          "failure_to_enroll": 0.0
+        },
+        "rotate 30 deg": {
+          "accuracy": 0.995,
+          "failure_to_enroll": 0.0
+        }
+      },
+      "timing_250px": {
+        "p50_ms": 25.786399999560672,
+        "p95_ms": 28.111100000387523,
+        "provider": "CUDAExecutionProvider"
+      },
+      "timing_1280px": {
+        "p50_ms": 26.23659999881056,
+        "p95_ms": 28.01039999940258,
+        "provider": "CUDAExecutionProvider"
+      },
+      "licence": "InsightFace pretrained weights: non-commercial research use only; training-data terms vary (see https://github.com/deepinsight/insightface)"
+    }
+  }
+}
