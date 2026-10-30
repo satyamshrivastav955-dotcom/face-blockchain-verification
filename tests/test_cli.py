@@ -31,6 +31,7 @@ class TestParser:
             "doctor",
             "deploy",
             "purge-evidence",
+            "anchor-batch",
         }
 
     def test_register_requires_an_image(self, capsys):

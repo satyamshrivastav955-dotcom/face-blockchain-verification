@@ -87,6 +87,9 @@ class Settings:
 
     # thresholds
     face_cosine_threshold: float = 0.363
+    # True only when FACE_COSINE_THRESHOLD was set explicitly; otherwise each engine's
+    # own benchmarked default applies (cosine scales differ between models).
+    face_threshold_explicit: bool = False
     phash_max_distance: int = 12
     max_candidates: int = 25
 
@@ -189,6 +192,7 @@ def load_settings(dotenv_path: str | Path | None = None) -> Settings:
         private_key=_env("PRIVATE_KEY"),
         contract_address=_env("CONTRACT_ADDRESS"),
         face_cosine_threshold=_env_float("FACE_COSINE_THRESHOLD", 0.363),
+        face_threshold_explicit=bool(_env("FACE_COSINE_THRESHOLD")),
         phash_max_distance=_env_int("PHASH_MAX_DISTANCE", 12),
         max_candidates=_env_int("MAX_CANDIDATES", 25),
         evidence_retention_days=_env_int("EVIDENCE_RETENTION_DAYS", 0),

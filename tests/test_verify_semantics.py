@@ -287,6 +287,7 @@ class TestCliJson:
             "local_integrity",
             "image_binding",
             "evidence_bundle",
+            "merkle_inclusion",
             "chain_anchor",
             "url_commitment",
         }

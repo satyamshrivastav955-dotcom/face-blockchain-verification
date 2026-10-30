@@ -165,6 +165,7 @@ def cmd_register(args: argparse.Namespace) -> int:
         consent_public_upload=args.consent_public_upload,
         require_face_match=args.require_face_match,
         minimal_evidence=args.minimal_evidence,
+        anchor_mode=args.anchor_mode,
         output=args.output,
         console=ui,
     )
@@ -796,6 +797,23 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_anchor_batch(args: argparse.Namespace) -> int:
+    """Anchor several sealed records with one Merkle-root transaction."""
+    settings = _settings(args)
+    ui = _console(args)
+    paths: list[Path] = []
+    for item in args.records:
+        p = _resolve(item)
+        paths.extend(sorted(p.glob("*.json")) if p.is_dir() else [p])
+    paths = [p for p in paths if p.exists()]
+    if not paths:
+        ui.fail("no record files found")
+        return EXIT_ERROR
+    from .pipeline import run_anchor_batch
+
+    return run_anchor_batch(settings, list(paths), dry_run=args.dry_run, console=ui)
+
+
 def cmd_purge_evidence(args: argparse.Namespace) -> int:
     """List - and with --yes delete - old local evidence bundles."""
     from .privacy import purge_evidence
@@ -877,7 +895,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="reverse-search backend: serpapi_lens, tineye, local_fixture",
     )
     register.add_argument(
-        "--engine", default="opencv", metavar="NAME", help="face engine: opencv (default) or stub"
+        "--engine",
+        default="opencv",
+        metavar="NAME",
+        help="face engine: opencv (default, permissive licences), arcface-r50 / arcface-r100 "
+        "(higher accuracy; InsightFace weights are NON-COMMERCIAL), auto (best available), stub (tests)"
     )
     register.add_argument(
         "--image-url",
@@ -924,6 +946,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not save face crops, the matched image bytes or the comparison image",
     )
     register.add_argument("--output", default="", metavar="PATH", help="where to write the record")
+    register.add_argument(
+        "--anchor-mode",
+        choices=("single", "batch"),
+        default="single",
+        help="single: one transaction per record (default). batch: seal now, anchor many "
+        "records later with ONE Merkle-root transaction (see 'anchor-batch')",
+    )
     register.set_defaults(func=cmd_register)
 
     # -- search ------------------------------------------------------------
@@ -1062,6 +1091,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor.add_argument("--offline", action="store_true", help="skip all network checks")
     doctor.set_defaults(func=cmd_doctor)
+
+    # -- anchor-batch ------------------------------------------------------
+    batch = subparsers.add_parser(
+        "anchor-batch",
+        parents=[common, chain_opts],
+        help="anchor several sealed records with ONE Merkle-root transaction",
+        description=(
+            "Records sealed with 'register --anchor-mode batch' are gathered into an RFC 6962 "
+            "Merkle tree; its root is registered in a single transaction and every record gets "
+            "its inclusion proof. Needs a v3 registry. With --dry-run nothing leaves this machine."
+        ),
+    )
+    batch.add_argument("records", nargs="+", metavar="RECORD", help="record files, or a directory of them")
+    batch.set_defaults(func=cmd_anchor_batch)
 
     # -- purge-evidence ----------------------------------------------------
     purge = subparsers.add_parser(

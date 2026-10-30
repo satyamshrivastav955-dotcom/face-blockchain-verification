@@ -11,6 +11,7 @@ from typing import Any
 
 from .blockchain.client import ChainError, EvmChainClient, build_chain_client, url_commitment
 from .config import SOCIAL_DOMAINS, ConfigError, Settings
+from .evidence.batch import BatchError, build_batch, check_record_proof, merkle_block
 from .evidence.bundle import EvidenceBundle, new_run_id, verify_bundle
 from .evidence.hashing import canonicalize, fmt_score, sha256_bytes, sha256_file
 from .evidence.record import (
@@ -26,6 +27,7 @@ from .privacy import ConsentError, require_consent
 from .publish import PublishError, publish_image
 from .search import SearchError, build_provider, is_social, rank_candidates
 from .ui import Console
+from .verification.c2pa_check import inspect_content_credentials
 from .verification.candidate_matcher import (
     ConfirmationStatus,
     claim_for,
@@ -38,6 +40,7 @@ from .vision.face_detector import (
     OpenCVFaceEngine,
     StubFaceEngine,
     embedding_fingerprint,
+    select_primary,
 )
 from .vision.preprocess import (
     decode_image_safely,
@@ -54,8 +57,10 @@ __all__ = [
     "EXIT_NO_MATCH",
     "EXIT_INCONCLUSIVE",
     "build_engine",
+    "resolve_cosine_threshold",
     "run_register",
     "run_verify",
+    "run_anchor_batch",
 ]
 
 EXIT_OK = 0
@@ -79,6 +84,15 @@ def build_engine(name: str, settings: Settings, *, allow_stub: bool = False):
     and silently falling back to it would produce a record that looks real.
     """
     key = (name or "opencv").lower()
+    if key == "auto":
+        from .vision.onnx_engine import available_engines
+
+        ready = available_engines(settings.models_dir)
+        key = next((k for k in ("arcface-r50", "arcface-r100") if k in ready), "opencv")
+    if key in ("arcface-r50", "arcface-r100"):
+        from .vision.onnx_engine import OnnxFaceEngine
+
+        return OnnxFaceEngine(settings.models_dir, key)
     if key in ("opencv", "yunet", "sface", "default"):
         return OpenCVFaceEngine(settings.models_dir)
     if key == "stub":
@@ -88,7 +102,17 @@ def build_engine(name: str, settings: Settings, *, allow_stub: bool = False):
                 "--allow-offline-stub if you really mean to use it."
             )
         return StubFaceEngine()
-    raise ConfigError(f"unknown face engine {name!r} (expected 'opencv' or 'stub')")
+    raise ConfigError(f"unknown face engine {name!r} (expected opencv, arcface-r50, arcface-r100, auto or stub)")
+
+
+def resolve_cosine_threshold(settings: Settings, engine) -> tuple[float, str]:
+    """(threshold, source): an explicit FACE_COSINE_THRESHOLD wins, else the engine's benchmarked default."""
+    if settings.face_threshold_explicit:
+        return settings.face_cosine_threshold, "explicit"
+    default = getattr(engine, "default_threshold", None)
+    if default is None:
+        return settings.face_cosine_threshold, "settings"
+    return float(default), "engine_default"
 
 
 # ---------------------------------------------------------------------------
@@ -111,6 +135,7 @@ def run_register(
     consent_public_upload: bool = False,
     require_face_match: bool = False,
     minimal_evidence: bool = False,
+    anchor_mode: str = "single",
     output: str | Path | None = None,
     console: Console | None = None,
 ) -> int:
@@ -130,6 +155,22 @@ def run_register(
     ui.ok(f"{path.name}  {info['width']}x{info['height']}  {path.stat().st_size:,} bytes")
     ui.info(f"sha256  {image_sha256}")
     ui.info(f"pHash   {query_phash:016x}")
+    credentials = inspect_content_credentials(path.read_bytes())
+    if credentials.state == "valid":
+        ui.ok(
+            f"C2PA Content Credentials present: signed by {credentials.issuer or credentials.signer_common_name or '?'}"
+            f" ({credentials.claim_generator or 'unknown tool'})"
+        )
+        if credentials.untrusted_signer:
+            ui.warn(
+                "the signing certificate is not on a trust list: the manifest is consistent, not necessarily trusted"
+            )
+        if credentials.ai_generated:
+            ui.warn("the manifest declares this image AI-generated (a statement by its signer)")
+    elif credentials.state == "invalid":
+        ui.warn("C2PA manifest present but FAILS validation (altered after signing, or malformed)")
+    else:
+        ui.info(f"C2PA Content Credentials: {credentials.state} (absence proves nothing)")
 
     run_id = new_run_id(image_sha256)
     bundle = EvidenceBundle(settings.evidence_dir, run_id)
@@ -138,6 +179,9 @@ def run_register(
     ui.step("Detecting and encoding face (local)")
     engine = build_engine(engine_name, settings, allow_stub=allow_offline_stub)
     stub_engine = isinstance(engine, StubFaceEngine)
+    cosine_threshold, threshold_source = resolve_cosine_threshold(settings, engine)
+    if not getattr(engine, "commercial_use", True) and not stub_engine:
+        ui.warn(f"model licence: {getattr(engine, 'model_license', 'non-commercial')}")
     if stub_engine:
         ui.banner(
             [
@@ -154,12 +198,16 @@ def run_register(
         ui.info("try a clearer, front-facing photo where the face is at least 60px wide")
         return EXIT_ERROR
 
-    primary = embeddable[0]
+    primary, ambiguous = select_primary(embeddable, image.shape)
+    assert primary is not None and primary.embedding is not None
     ui.ok(f"{len(faces)} face(s) detected, {len(embeddable)} encodable")
-    if len(embeddable) > 1:
+    if ambiguous:
         ui.warn(
-            "several faces found: the LARGEST one is used as the query face (crop the photo if that is not the subject)"
+            "several comparably prominent faces found: the one nearest the centre and largest is used "
+            "as the query face (crop the photo if that is not the subject)"
         )
+    elif len(embeddable) > 1:
+        ui.info(f"{len(embeddable)} faces found; using the most prominent (largest, nearest the centre)")
     x, y, w, h = primary.bbox
     ui.info(f"primary face bbox x={x} y={y} w={w} h={h}  score={fmt_score(primary.det_score)}")
     ui.info(f"embedding: {primary.embedding.size}-d via {engine.name}")
@@ -250,9 +298,10 @@ def run_register(
         query_phash=query_phash,
         candidates=ranked,
         engine=engine,
-        cosine_threshold=settings.face_cosine_threshold,
+        cosine_threshold=cosine_threshold,
         phash_max_distance=settings.phash_max_distance,
         social_domains=SOCIAL_DOMAINS,
+        query_image=image,
         max_candidates=limit,
         stop_early=stop_early,
         allow_local_files=bool(provider.is_offline_stub),
@@ -300,7 +349,7 @@ def run_register(
         ui.info(
             f"best face similarity was "
             f"{fmt_score(max((c.face_similarity for c in confirmations), default=0.0))}, "
-            f"threshold is {fmt_score(settings.face_cosine_threshold)}"
+            f"threshold is {fmt_score(cosine_threshold)}"
         )
         if require_face_match and any(c.status == ConfirmationStatus.IMAGE_DERIVATIVE for c in confirmations):
             ui.info("an image-derivative candidate exists but --require-face-match excludes it")
@@ -334,7 +383,7 @@ def run_register(
     ui.field("matched post", best.candidate.page_url)
     ui.field(
         "face similarity",
-        f"{fmt_score(best.face_similarity)} (threshold {fmt_score(settings.face_cosine_threshold)})"
+        f"{fmt_score(best.face_similarity)} (threshold {fmt_score(cosine_threshold)})"
         f" - {'PASSED' if best.face_check_passed else 'not passed'}",
     )
     ui.field(
@@ -351,7 +400,7 @@ def run_register(
             primary.aligned,
             best.candidate_face.aligned if best.candidate_face else None,
             similarity=fmt_score(best.face_similarity),
-            threshold=fmt_score(settings.face_cosine_threshold),
+            threshold=fmt_score(cosine_threshold),
             phash_distance=int(best.phash_distance or 0),
             matched_url=best.candidate.page_url,
             accepted=is_face,
@@ -370,7 +419,7 @@ def run_register(
         except Exception:  # noqa: BLE001 - the digest is still recorded
             candidate_image = None
 
-    claim = claim_for(best.status)
+    claim = claim_for(best.status, best.derivative_basis or "phash")
     if stub_engine:
         claim = "TEST ONLY - stub engine, no real face analysis was performed: " + claim
 
@@ -382,6 +431,7 @@ def run_register(
             "width": info["width"],
             "height": info["height"],
             "phash": f"{query_phash:016x}",
+            "content_credentials": credentials.to_json(),
         },
         face={
             "engine": engine.name,
@@ -396,6 +446,9 @@ def run_register(
             # embedding can confirm it, so treat it as personal data.
             "embedding_commitment_sha256": embedding_fingerprint(primary.embedding),
             "embedding_on_chain": False,
+            "model_license": str(getattr(engine, "model_license", "")),
+            "commercial_use": bool(getattr(engine, "commercial_use", False)),
+            "threshold_source": threshold_source,
         },
         search={
             "provider": result.provider,
@@ -422,14 +475,23 @@ def run_register(
             "matched_image_phash": (phash_hex(candidate_image) if candidate_image is not None else ""),
             "is_social_media": bool(best.social),
             "face_similarity": fmt_score(best.face_similarity),
-            "face_cosine_threshold": fmt_score(settings.face_cosine_threshold),
+            "face_cosine_threshold": fmt_score(cosine_threshold),
             "phash_distance": int(best.phash_distance or 0),
             "phash_max_distance": int(settings.phash_max_distance),
             "faces_in_matched_image": int(best.faces_in_candidate),
             "provider_position": int(best.candidate.position),
             "require_face_match": bool(require_face_match),
+            "candidate_content_credentials": (
+                inspect_content_credentials(best.candidate_image_bytes).to_json()
+                if best.candidate_image_bytes
+                else None
+            ),
             "claim": claim,
-            "limitations": limitations_for(best.status),
+            "limitations": limitations_for(best.status, best.derivative_basis or "phash"),
+            "derivative_basis": best.derivative_basis,
+            "geometric_inliers": int(best.geo_inliers),
+            "geometric_matches": int(best.geo_matches),
+            "geometric_mirrored": bool(best.geo_mirrored),
         },
         evidence_type=best.evidence_type,
         test_mode={
@@ -449,6 +511,20 @@ def run_register(
     ui.field("verification hash", verification_hash)
 
     # -- stage 6: anchor ---------------------------------------------------
+    if anchor_mode == "batch":
+        ui.step("Anchoring deferred (Merkle batch)")
+        ui.info("this record is sealed but NOT anchored yet; it will be anchored with others in one transaction")
+        ui.info("run:  python -m src.main anchor-batch <record files...>")
+        record["anchor"] = {"mode": "merkle_batch", "status": "pending"}
+        out_path = Path(output) if output else (settings.output_dir / "verification.json")
+        save_record(record, out_path)
+        bundle.write_json("verification.json", record)
+        bundle.finalize()
+        ui.step("Done")
+        ui.field("record", str(out_path))
+        ui.field("evidence", str(bundle.dir))
+        return EXIT_OK
+
     ui.step("Anchoring on-chain" if not dry_run else "Anchoring (SIMULATED local chain)")
     client = build_chain_client(settings, dry_run=dry_run)
     if dry_run:
@@ -517,10 +593,11 @@ def run_verify(
         "local_integrity": _check("skipped"),
         "image_binding": _check("skipped", "not requested (pass --image)"),
         "evidence_bundle": _check("skipped", "not requested (pass --evidence-dir)"),
+        "merkle_inclusion": _check("skipped", "not a batch-anchored record"),
         "chain_anchor": _check("skipped"),
         "url_commitment": _check("skipped"),
     }
-    report.update({"checks": checks, "simulated": False, "test_only": False})
+    report.update({"checks": checks, "simulated": False, "test_only": False, "anchor_mode": "single"})
 
     def finish(status: Status, *, message: str = "") -> int:
         report["verdict"] = _VERDICT_NAMES[status]
@@ -633,6 +710,10 @@ def run_verify(
     ui.info(f"network {described.get('network')} (chain id {described.get('chain_id')})")
     ui.info(f"contract {described.get('contract_address') or described.get('store')}")
 
+    if anchor.get("mode") == "merkle_batch":
+        report["anchor_mode"] = "merkle_batch"
+        return _verify_batch_anchor(ui, client, check, matched_url, anchor, checks, report, finish, dry_run)
+
     try:
         chain_record = client.lookup(check.recomputed_hash)
     except ChainError as exc:
@@ -703,6 +784,128 @@ def run_verify(
         report.setdefault("warnings", []).append("anchor block number differs from the chain")
 
     return finish(Status.OK)
+
+
+def _verify_batch_anchor(ui, client, check, matched_url, anchor, checks, report, finish, dry_run) -> int:
+    """Chain verification for a record anchored through a Merkle batch."""
+    ui.step("Step 3b  -  Merkle inclusion, then the batch root on-chain")
+    merkle = anchor.get("merkle")
+    if not isinstance(merkle, dict):
+        checks["merkle_inclusion"] = _check("fail", "record is pending: no merkle proof yet")
+        checks["chain_anchor"] = _check("fail", "batch not anchored yet")
+        ui.fail("PENDING  -  this record was queued for a batch that has not been anchored")
+        ui.info("run 'anchor-batch' on it, then verify again")
+        return finish(Status.NOT_ANCHORED)
+    if not isinstance(matched_url, str) or not matched_url:
+        checks["merkle_inclusion"] = _check("fail", "record has no matched_url")
+        return finish(Status.ANCHOR_MISMATCH)
+    from .blockchain.client import url_commitment as _commit
+
+    proof = check_record_proof(check.recomputed_hash, _commit(matched_url), merkle)
+    if not proof.ok:
+        checks["merkle_inclusion"] = _check("fail", proof.reason)
+        checks["url_commitment"] = _check("fail", "not bound: inclusion proof failed")
+        ui.fail(f"INCLUSION PROOF FAILED  -  {proof.reason}")
+        return finish(Status.ANCHOR_MISMATCH)
+    checks["merkle_inclusion"] = _check(
+        "pass", f"leaf (hash + URL commitment, recomputed) is in the root; {len(merkle['proof'])}-hash proof"
+    )
+    ui.ok(f"INCLUSION  -  the record is leaf {merkle['index']} of {merkle['size']} under {proof.root[:18]}...")
+    try:
+        batch = client.lookup_batch(proof.root)
+    except ChainError as exc:
+        checks["chain_anchor"] = _check("error", str(exc)[:300])
+        ui.fail(f"batch lookup could not be completed: {exc}")
+        return finish(Status.INCONCLUSIVE, message=str(exc)[:300])
+    if not batch.exists:
+        checks["chain_anchor"] = _check("fail", "batch root is not registered")
+        ui.fail("NOT ANCHORED  -  the batch root is not registered on-chain")
+        return finish(Status.NOT_ANCHORED)
+    checks["chain_anchor"] = _check("pass", f"batch root found on-chain (covers {batch.size} records)")
+    checks["url_commitment"] = _check("pass", "bound by the Merkle leaf (keccak256(matched_url) is part of it)")
+    ui.ok("ANCHORED  -  the batch root is on-chain")
+    ui.field("batch size", str(batch.size))
+    ui.field("submitter", batch.submitter)
+    ui.field("block number", str(batch.block_number))
+    ui.field("block timestamp", _fmt_ts(batch.timestamp))
+    report.setdefault("chain", {}).update(
+        {
+            "submitter": batch.submitter,
+            "block_number": batch.block_number,
+            "block_timestamp": batch.timestamp,
+            "tx_hash": anchor.get("tx_hash", ""),
+            "explorer_url": anchor.get("explorer_url", ""),
+            "batch_root": proof.root,
+            "batch_size": batch.size,
+        }
+    )
+    if int(merkle["size"]) != batch.size:
+        report.setdefault("warnings", []).append("merkle size in the record differs from the on-chain batch size")
+    return finish(Status.OK)
+
+
+def run_anchor_batch(
+    settings: Settings,
+    record_paths: list[str | Path],
+    *,
+    dry_run: bool = False,
+    console: Console | None = None,
+) -> int:
+    """Anchor several sealed records with ONE transaction and write each its inclusion proof."""
+    ui = console or Console()
+    ui.header("Image provenance verification  -  ANCHOR BATCH")
+    settings.validate()
+    entries: list[tuple[str, str]] = []
+    records: list[tuple[Path, dict]] = []
+    from .blockchain.client import url_commitment as _commit
+
+    for rp in record_paths:
+        path = Path(rp)
+        record = load_record(path)
+        check = check_local_integrity(record)
+        anchor = record.get("anchor") or {}
+        match = (record["payload"].get("match")) or {}
+        url = match.get("matched_url")
+        if not check.ok:
+            ui.fail(f"{path.name}: failed local integrity ({check.error or 'hash mismatch'}); not batching")
+            return EXIT_ERROR
+        if anchor.get("merkle") or anchor.get("tx_hash"):
+            ui.fail(f"{path.name}: already anchored; nothing to do")
+            return EXIT_ERROR
+        if not isinstance(url, str) or not url:
+            ui.fail(f"{path.name}: no matched_url; cannot build its leaf")
+            return EXIT_ERROR
+        entries.append((check.recomputed_hash, _commit(url)))
+        records.append((path, record))
+    try:
+        plan = build_batch(entries)
+    except BatchError as exc:
+        ui.fail(str(exc))
+        return EXIT_ERROR
+
+    ui.step(f"Batch of {plan.size} record(s)")
+    ui.field("merkle root", plan.root)
+    client = build_chain_client(settings, dry_run=dry_run)
+    if dry_run:
+        ui.warn("--dry-run: writing to the SIMULATED local chain, not a blockchain")
+    ui.info("one transaction covers every record in this batch")
+    anchor_result = client.register_batch(plan.root, plan.size)
+    ui.ok(f"transaction confirmed in block {anchor_result.block_number}")
+    ui.field("tx hash", anchor_result.tx_hash)
+    if anchor_result.explorer_url:
+        ui.field("explorer", anchor_result.explorer_url)
+    if anchor_result.gas_used:
+        ui.field("gas used", f"{anchor_result.gas_used:,}  (~{anchor_result.gas_used // plan.size:,} per record)")
+    for index, (path, record) in enumerate(records):
+        block = anchor_result.to_json()
+        block.pop("url_commitment", None)
+        block.update({"mode": "merkle_batch", "merkle": merkle_block(plan, index)})
+        attach_anchor(record, block)
+        save_record(record, path)
+        ui.ok(f"{path.name}: leaf {index} of {plan.size}, {len(plan.proofs[index])}-hash proof written")
+    ui.out()
+    ui.out("  Verify any of them with:  python -m src.main verify --record <file>")
+    return EXIT_OK
 
 
 def _fmt_ts(timestamp: int) -> str:
