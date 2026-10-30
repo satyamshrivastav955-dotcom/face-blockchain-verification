@@ -55,6 +55,7 @@ restricts registration to face matches. Among eligible candidates the order is:
 from __future__ import annotations
 
 import math
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -63,6 +64,7 @@ import numpy as np
 
 from ..evidence.hashing import fmt_score, sha256_bytes
 from ..search import Candidate, is_social
+from .geometry import GeometricMatcher, GeoResult
 from ..vision.face_detector import Face, best_similarity
 from ..vision.preprocess import (
     DownloadError,
@@ -126,6 +128,7 @@ def classify(
     phash_distance: int | None,
     cosine_threshold: float,
     phash_max_distance: int,
+    geometric_passed: bool = False,
 ) -> str:
     """Pure decision rule: measurements in, status out.
 
@@ -134,7 +137,7 @@ def classify(
     the threshold is configured.
     """
     face_ok = embeddable_faces > 0 and _finite(face_similarity) and face_similarity >= cosine_threshold
-    derivative_ok = phash_distance is not None and 0 <= phash_distance <= phash_max_distance
+    derivative_ok = (phash_distance is not None and 0 <= phash_distance <= phash_max_distance) or geometric_passed
     if face_ok:
         return ConfirmationStatus.FACE_MATCH
     if derivative_ok:
@@ -144,7 +147,7 @@ def classify(
     return ConfirmationStatus.LOW_SIMILARITY
 
 
-def claim_for(status: str) -> str:
+def claim_for(status: str, basis: str = "phash") -> str:
     """The sentence a record may assert for an accepted outcome.
 
     Wording depends on the evidence type and never promotes image similarity to
@@ -158,6 +161,15 @@ def claim_for(status: str) -> str:
             "similarity measurement supporting image provenance, not a statement "
             "of any person's identity"
         )
+    if status == ConfirmationStatus.IMAGE_DERIVATIVE and basis == "geometric":
+        return (
+            "the image at matched_image_url, published on matched_url, shares rendered "
+            "content with source_image: local features match under a single geometric "
+            "transform (see the recorded inlier counts), consistent with a cropped, "
+            "rotated, mirrored or resized copy; face matching did NOT independently "
+            "confirm a match, so this asserts shared image content only, not that the "
+            "same face or person appears"
+        )
     if status == ConfirmationStatus.IMAGE_DERIVATIVE:
         return (
             "the image at matched_image_url, published on matched_url, is "
@@ -170,11 +182,18 @@ def claim_for(status: str) -> str:
     raise ValueError(f"no claim is defined for status {status!r}")
 
 
-def limitations_for(status: str) -> list[str]:
+def limitations_for(status: str, basis: str = "phash") -> list[str]:
     common = [
         "a local record proves what the pipeline measured, not that the claim is true",
         "thresholds are model- and data-dependent and are not calibrated for any population",
     ]
+    if status == ConfirmationStatus.IMAGE_DERIVATIVE and "geometric" in basis:
+        return [
+            "local-feature matching shows shared rendered content, not facial similarity",
+            "repeated textures, text or logos can produce spurious feature matches",
+            "the face test did not pass or was not possible for this candidate",
+            *common,
+        ]
     if status == ConfirmationStatus.IMAGE_DERIVATIVE:
         return [
             "perceptual hashing measures image similarity, not facial similarity",
@@ -197,6 +216,10 @@ class Confirmation:
     face_similarity: float = 0.0
     phash_distance: int | None = None
     faces_in_candidate: int = 0
+    geo_inliers: int = 0
+    geo_matches: int = 0
+    geo_mirrored: bool = False
+    derivative_basis: str = ""  # "phash", "geometric" or "phash+geometric" when the derivative test passed
     embeddable_faces: int = 0
     candidate_image_sha256: str = ""
     candidate_image_bytes: bytes | None = field(default=None, repr=False)
@@ -234,6 +257,10 @@ class Confirmation:
             "faces_in_candidate": int(self.faces_in_candidate),
             "face_check_passed": bool(self.face_check_passed),
             "derivative_check_passed": bool(self.derivative_check_passed),
+            "derivative_basis": self.derivative_basis,
+            "geo_inliers": int(self.geo_inliers),
+            "geo_matches": int(self.geo_matches),
+            "geo_mirrored": bool(self.geo_mirrored),
             "candidate_image_sha256": self.candidate_image_sha256,
             **({"error": self.error[:200]} if self.error else {}),
         }
@@ -274,9 +301,11 @@ def confirm_candidates(
     cosine_threshold: float,
     phash_max_distance: int,
     social_domains: tuple[str, ...],
+    query_image: np.ndarray | None = None,
     max_candidates: int = 25,
     stop_early: bool = False,
     allow_local_files: bool = False,
+    download_workers: int = 4,
     progress: Callable[[str], None] | None = None,
 ) -> list[Confirmation]:
     """Check each candidate independently and return every result, in order.
@@ -287,83 +316,125 @@ def confirm_candidates(
     """
     say = progress or (lambda _msg: None)
     results: list[Confirmation] = []
+    geo = GeometricMatcher(query_image) if query_image is not None else None
     total = min(len(candidates), max_candidates)
 
-    for index, candidate in enumerate(candidates[:max_candidates], start=1):
-        social = is_social(candidate.page_url, social_domains)
-        image_url = candidate.best_image_url()
-        label = f"[{index}/{total}] {candidate.domain or '?'}"
+    # Downloads are I/O-bound and independent, so they run in a small thread pool a few
+    # candidates ahead of the (GPU/CPU-bound) analysis. Results are still consumed and
+    # reported strictly in candidate order, so output and selection stay deterministic.
+    # The sliding window bounds how many decoded images are held at once.
+    work = list(candidates[:max_candidates])
+    workers = max(1, int(download_workers))
+    window = workers * 2
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="candidate-dl")
+    pending: dict[int, Future] = {}
+    submitted: set[int] = set()
 
-        if not image_url:
-            say(f"  {label}: no image URL, skipping (not a negative result)")
-            results.append(_skipped(candidate, social, ConfirmationStatus.NO_IMAGE_URL))
-            continue
+    def _fill_window(upto: int) -> None:
+        for i in range(1, min(upto, len(work)) + 1):
+            if i in submitted:
+                continue
+            submitted.add(i)
+            url = work[i - 1].best_image_url()
+            if url:
+                pending[i] = pool.submit(_load_candidate_image, url, allow_local_files=allow_local_files)
 
-        try:
-            raw, image = _load_candidate_image(image_url, allow_local_files=allow_local_files)
-        except UnsafeDownloadError as exc:
-            say(f"  {label}: URL refused by the safety guard ({exc})")
-            results.append(_skipped(candidate, social, ConfirmationStatus.URL_BLOCKED, str(exc)))
-            continue
-        except Exception as exc:  # noqa: BLE001 - a bad candidate must not abort the run
-            say(f"  {label}: download failed ({exc})")
-            results.append(_skipped(candidate, social, ConfirmationStatus.DOWNLOAD_FAILED, str(exc)))
-            continue
+    _fill_window(window)
+    try:
+        for index, candidate in enumerate(candidates[:max_candidates], start=1):
+            social = is_social(candidate.page_url, social_domains)
+            _fill_window(index + window - 1)
+            image_url = candidate.best_image_url()
+            label = f"[{index}/{total}] {candidate.domain or '?'}"
 
-        try:
-            distance = hamming(query_phash, phash(image))
-            faces = engine.analyze(image)
-            embeddable = [f for f in faces if f.embedding is not None]
-            similarity, matched_face = best_similarity(query_embedding, embeddable)
-        except Exception as exc:  # noqa: BLE001
-            say(f"  {label}: analysis failed ({type(exc).__name__})")
-            results.append(
-                _skipped(
-                    candidate, social, ConfirmationStatus.ANALYSIS_FAILED, f"analysis failed: {type(exc).__name__}"
+            if not image_url:
+                say(f"  {label}: no image URL, skipping (not a negative result)")
+                results.append(_skipped(candidate, social, ConfirmationStatus.NO_IMAGE_URL))
+                continue
+
+            try:
+                raw, image = pending.pop(index).result()
+            except UnsafeDownloadError as exc:
+                say(f"  {label}: URL refused by the safety guard ({exc})")
+                results.append(_skipped(candidate, social, ConfirmationStatus.URL_BLOCKED, str(exc)))
+                continue
+            except Exception as exc:  # noqa: BLE001 - a bad candidate must not abort the run
+                say(f"  {label}: download failed ({exc})")
+                results.append(_skipped(candidate, social, ConfirmationStatus.DOWNLOAD_FAILED, str(exc)))
+                continue
+
+            try:
+                distance = hamming(query_phash, phash(image))
+                faces = engine.analyze(image)
+                embeddable = [f for f in faces if f.embedding is not None]
+                similarity, matched_face = best_similarity(query_embedding, embeddable)
+            except Exception as exc:  # noqa: BLE001
+                say(f"  {label}: analysis failed ({type(exc).__name__})")
+                results.append(
+                    _skipped(
+                        candidate, social, ConfirmationStatus.ANALYSIS_FAILED, f"analysis failed: {type(exc).__name__}"
+                    )
                 )
+                continue
+
+            face_ok = len(embeddable) > 0 and _finite(similarity) and similarity >= cosine_threshold
+            phash_ok = 0 <= distance <= phash_max_distance
+            geo_result = GeoResult()
+            if geo is not None and not face_ok and not phash_ok:
+                # Only pay for local-feature matching when neither cheaper test passed:
+                # it is what recovers crops, rotations and mirrored copies pHash misses.
+                try:
+                    geo_result = geo.match(image)
+                except Exception:  # noqa: BLE001 - geometric verification is best-effort evidence
+                    geo_result = GeoResult(reason="geometric matching failed")
+            status = classify(
+                face_similarity=similarity,
+                embeddable_faces=len(embeddable),
+                phash_distance=distance,
+                cosine_threshold=cosine_threshold,
+                phash_max_distance=phash_max_distance,
+                geometric_passed=geo_result.passed,
             )
-            continue
+            derivative_ok = phash_ok or geo_result.passed
+            basis = "+".join(b for b, ok in (("phash", phash_ok), ("geometric", geo_result.passed)) if ok)
+            confirmed = status in ConfirmationStatus.CONFIRMED
 
-        status = classify(
-            face_similarity=similarity,
-            embeddable_faces=len(embeddable),
-            phash_distance=distance,
-            cosine_threshold=cosine_threshold,
-            phash_max_distance=phash_max_distance,
-        )
-        face_ok = len(embeddable) > 0 and _finite(similarity) and similarity >= cosine_threshold
-        derivative_ok = 0 <= distance <= phash_max_distance
-        confirmed = status in ConfirmationStatus.CONFIRMED
+            confirmation = Confirmation(
+                candidate=candidate,
+                status=status,
+                face_similarity=similarity if _finite(similarity) else 0.0,
+                phash_distance=distance,
+                faces_in_candidate=len(faces),
+                embeddable_faces=len(embeddable),
+                candidate_image_sha256=sha256_bytes(raw),
+                candidate_image_bytes=raw if confirmed else None,
+                candidate_face=matched_face if confirmed else None,
+                social=social,
+                face_check_passed=face_ok,
+                derivative_check_passed=derivative_ok,
+                geo_inliers=geo_result.inliers,
+                geo_matches=geo_result.matches,
+                geo_mirrored=geo_result.mirrored,
+                derivative_basis=basis,
+            )
+            results.append(confirmation)
 
-        confirmation = Confirmation(
-            candidate=candidate,
-            status=status,
-            face_similarity=similarity if _finite(similarity) else 0.0,
-            phash_distance=distance,
-            faces_in_candidate=len(faces),
-            embeddable_faces=len(embeddable),
-            candidate_image_sha256=sha256_bytes(raw),
-            candidate_image_bytes=raw if confirmed else None,
-            candidate_face=matched_face if confirmed else None,
-            social=social,
-            face_check_passed=face_ok,
-            derivative_check_passed=derivative_ok,
-        )
-        results.append(confirmation)
+            verdict = {
+                ConfirmationStatus.FACE_MATCH: "FACE MATCH ",
+                ConfirmationStatus.IMAGE_DERIVATIVE: "IMG DERIV. ",
+            }.get(status, "rejected   ")
+            say(
+                f"  {label}: {verdict} cos={fmt_score(confirmation.face_similarity)}  "
+                f"pHash={distance:2d}/64  faces={len(faces)}"
+                f"{'  [social]' if social else ''}"
+            )
 
-        verdict = {
-            ConfirmationStatus.FACE_MATCH: "FACE MATCH ",
-            ConfirmationStatus.IMAGE_DERIVATIVE: "IMG DERIV. ",
-        }.get(status, "rejected   ")
-        say(
-            f"  {label}: {verdict} cos={fmt_score(confirmation.face_similarity)}  "
-            f"pHash={distance:2d}/64  faces={len(faces)}"
-            f"{'  [social]' if social else ''}"
-        )
+            if stop_early and confirmed and social:
+                say("  stopping early on first confirmed social match")
+                break
 
-        if stop_early and confirmed and social:
-            say("  stopping early on first confirmed social match")
-            break
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     return results
 
