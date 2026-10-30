@@ -41,7 +41,7 @@ librt==0.16.0
 multidict==7.2.1
 mypy==2.4.1
 mypy_extensions==1.1.0
-numpy==2.5.4
+numpy==2.2.6
 onnxruntime==1.31.1
 opencv-python==5.0.0.93
 opentelemetry-api==1.45.2
