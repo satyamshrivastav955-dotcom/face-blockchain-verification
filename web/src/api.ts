@@ -57,8 +57,12 @@ export interface VerificationRecord {
       face_cosine_threshold: string;
       phash_distance: number;
       phash_max_distance: number;
+      derivative_basis?: string;
+      geometric_inliers?: number;
+      geometric_matches?: number;
     };
-    face: { engine: string };
+    face: { engine: string; model_license?: string; commercial_use?: boolean };
+    source_image?: { content_credentials?: { state: string; issuer?: string; untrusted_signer?: boolean; ai_generated?: boolean } };
   };
   integrity: { algorithm: string; verification_hash: string };
   anchor: { simulated?: boolean; tx_hash?: string; block_number?: number; explorer_url?: string; network?: string } | null;

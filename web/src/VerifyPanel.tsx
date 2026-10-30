@@ -14,7 +14,8 @@ const CHECKS: Record<string, string> = {
   local_integrity: "Local integrity — hash recomputed from the payload",
   image_binding: "Image binding — record describes this file",
   evidence_bundle: "Evidence bundle — manifest and cross-links",
-  chain_anchor: "Ledger anchor — hash is registered",
+  merkle_inclusion: "Batch inclusion — Merkle proof from the record to the anchored root",
+  chain_anchor: "Ledger anchor — hash (or batch root) is registered",
   url_commitment: "URL commitment — keccak256 of the URL equals the on-chain value",
 };
 

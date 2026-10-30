@@ -151,6 +151,30 @@ export function JobView({ job, health }: { job: JobStatus; health: Health }) {
               <dd>
                 <ul>{(match.limitations ?? []).map((l) => <li key={l}>{l}</li>)}</ul>
               </dd>
+              <dt>Engine</dt>
+              <dd>
+                {record.payload.face.engine}
+                {record.payload.face.model_license && <span className="muted"> · {record.payload.face.model_license}</span>}
+              </dd>
+              {!isFace && match.derivative_basis && (
+                <>
+                  <dt>Derivative basis</dt>
+                  <dd>
+                    {match.derivative_basis}
+                    {(match.geometric_inliers ?? 0) > 0 && ` · ${match.geometric_inliers} of ${match.geometric_matches} local features agree on one transform`}
+                  </dd>
+                </>
+              )}
+              {record.payload.source_image?.content_credentials && (
+                <>
+                  <dt>Content credentials</dt>
+                  <dd>
+                    {record.payload.source_image.content_credentials.state}
+                    {record.payload.source_image.content_credentials.state === "valid" && record.payload.source_image.content_credentials.untrusted_signer && " (signer not on a trust list)"}
+                    {record.payload.source_image.content_credentials.ai_generated && " · declares AI-generated"}
+                  </dd>
+                </>
+              )}
               <dt>Seal</dt>
               <dd className="mono wrap">{record.integrity.verification_hash}<br /><span className="muted">{record.integrity.algorithm}</span></dd>
               <dt>Anchor</dt>
