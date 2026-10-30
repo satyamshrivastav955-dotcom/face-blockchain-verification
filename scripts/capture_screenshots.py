@@ -47,7 +47,8 @@ def shrink_pngs(max_width: int = 1500) -> None:
     for path in OUT.glob("*.png"):
         im = Image.open(path).convert("RGB")
         if im.width > max_width:
-            im = im.resize((max_width, round(im.height * max_width / im.width)), Image.LANCZOS)
+            resample = getattr(Image, "Resampling", Image).LANCZOS
+            im = im.resize((max_width, round(im.height * max_width / im.width)), resample)
         im.quantize(colors=192, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE).save(path, optimize=True)
 
 

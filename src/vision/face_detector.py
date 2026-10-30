@@ -298,7 +298,7 @@ class StubFaceEngine:
         height, width = img.shape[:2]
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
         grid = cv2.resize(gray, (16, 16), interpolation=cv2.INTER_AREA)
-        vec = grid.astype(np.float32).ravel()  # 256
+        vec: Any = grid.astype(np.float32).ravel()  # 256
         vec = vec[0::2] + vec[1::2]  # -> 128
         vec = vec - float(vec.mean())
         norm = float(np.linalg.norm(vec))
