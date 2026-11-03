@@ -21,7 +21,7 @@ from src.trust import (
     sign_record,
 )
 from src.ui import Console
-from tests.conftest import make_blob
+from conftest import make_blob
 
 
 @pytest.fixture
