@@ -285,6 +285,7 @@ class TestCliJson:
         assert data["verdict"] in {"verified", "not_anchored"}
         assert set(data["checks"]) == {
             "local_integrity",
+            "signature",
             "image_binding",
             "evidence_bundle",
             "merkle_inclusion",

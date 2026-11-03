@@ -154,7 +154,9 @@ def seal(payload: dict[str, Any]) -> dict[str, Any]:
     """Wrap *payload* in an envelope carrying its hash."""
     canonical = canonicalize(payload)
     return {
-        "schema": SCHEMA_VERSION,
+        # The envelope schema follows the payload's own schema (face-match records and image-only
+        # attestations share this envelope); an unlabelled payload gets the current default.
+        "schema": payload.get("schema", SCHEMA_VERSION),
         "payload": payload,
         "integrity": {
             "algorithm": INTEGRITY_ALGORITHM,
@@ -243,6 +245,9 @@ def validate_record(record: Any, *, name: str = "record") -> None:
     anchor = record.get("anchor")
     if anchor is not None and not isinstance(anchor, dict):
         raise RecordError(f"{name}: 'anchor' must be an object or null")
+    signature = record.get("signature")
+    if signature is not None and not isinstance(signature, dict):
+        raise RecordError(f"{name}: 'signature' must be an object or absent")
     match = payload.get("match")
     if match is not None and not isinstance(match, dict):
         raise RecordError(f"{name}: payload.match must be an object")

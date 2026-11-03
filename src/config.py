@@ -93,6 +93,14 @@ class Settings:
     phash_max_distance: int = 12
     max_candidates: int = 25
 
+    # record signing (Ed25519 PEM) and OpenTimestamps; both optional, both off by default
+    signing_key_file: str = ""
+    ots_calendars: str = ""  # comma-separated; empty = the public defaults
+    ots_explorers: str = ""  # comma-separated block-explorer API bases; empty = the public defaults
+    # PEM bundle of C2PA trust anchors (e.g. the official C2PA Trust List, downloaded by you). Empty = nothing
+    # is ever reported as a trusted signer.
+    c2pa_trust_anchors_file: str = ""
+
     # local evidence retention: 0 = keep forever (purge manually with
     # 'purge-evidence'); N > 0 = 'purge-evidence' defaults to N days
     evidence_retention_days: int = 0
@@ -196,5 +204,9 @@ def load_settings(dotenv_path: str | Path | None = None) -> Settings:
         phash_max_distance=_env_int("PHASH_MAX_DISTANCE", 12),
         max_candidates=_env_int("MAX_CANDIDATES", 25),
         evidence_retention_days=_env_int("EVIDENCE_RETENTION_DAYS", 0),
+        signing_key_file=_env("SIGNING_KEY_FILE"),
+        ots_calendars=_env("OTS_CALENDARS"),
+        ots_explorers=_env("OTS_EXPLORERS"),
+        c2pa_trust_anchors_file=_env("C2PA_TRUST_ANCHORS_FILE"),
         root=Path(_env("PROJECT_DIR")).expanduser().resolve() if _env("PROJECT_DIR") else PROJECT_ROOT,
     )

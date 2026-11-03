@@ -32,6 +32,11 @@ class TestParser:
             "deploy",
             "purge-evidence",
             "anchor-batch",
+            "keygen",
+            "attest",
+            "ots-upgrade",
+            "c2pa-embed",
+            "c2pa-check",
         }
 
     def test_register_requires_an_image(self, capsys):

@@ -168,6 +168,9 @@ def cmd_register(args: argparse.Namespace) -> int:
         anchor_mode=args.anchor_mode,
         output=args.output,
         console=ui,
+        sign=args.sign,
+        anchor_backend=args.anchor,
+        consent_timestamp_calendars=args.consent_timestamp_calendars,
     )
 
 
@@ -365,6 +368,8 @@ def cmd_verify(args: argparse.Namespace) -> int:
             evidence_dir=_resolve(args.evidence_dir) if args.evidence_dir else None,
             console=ui,
             report=report,
+            trusted_keys=args.trusted_key or None,
+            require_image=args.require_image,
         )
     except Exception as exc:  # noqa: BLE001 - a record that cannot be read is an error
         if args.json:
@@ -374,6 +379,144 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True, default=str))
     return code
+
+
+# ---------------------------------------------------------------------------
+# keygen / attest / ots-upgrade
+# ---------------------------------------------------------------------------
+
+
+def cmd_keygen(args: argparse.Namespace) -> int:
+    from .trust import SigningError, generate_key, key_id
+
+    ui = _console(args)
+    try:
+        pub = generate_key(_resolve(args.out))
+    except SigningError as exc:
+        ui.fail(str(exc))
+        return EXIT_ERROR
+    ui.ok(f"Ed25519 signing key written to {args.out} (keep it private; never commit it)")
+    ui.field("public key", pub)
+    ui.field("key id", key_id(pub))
+    ui.info("share the public key; verifiers pin it with:  verify --trusted-key <public key>")
+    ui.info(f"use it with:  SIGNING_KEY_FILE={args.out}  and  --sign")
+    return EXIT_OK
+
+
+def cmd_attest(args: argparse.Namespace) -> int:
+    settings = _settings(args)
+    ui = _console(args)
+    image = _resolve(args.image)
+    if not image.exists():
+        ui.fail(f"no such image: {image}")
+        return EXIT_ERROR
+    from .attest import run_attest
+
+    return run_attest(
+        settings,
+        image,
+        sign=args.sign,
+        anchor_backend=args.anchor,
+        consent_timestamp_calendars=args.consent_timestamp_calendars,
+        note=args.note,
+        output=args.output or None,
+        console=ui,
+    )
+
+
+def _trust_pem(settings: Settings) -> str | None:
+    path = settings.c2pa_trust_anchors_file
+    return Path(path).read_text(encoding="utf-8") if path else None
+
+
+def cmd_c2pa_embed(args: argparse.Namespace) -> int:
+    from .evidence.record import load_record
+    from .verification.c2pa_write import C2paWriteError, embed_record_reference, read_pem
+
+    ui = _console(args)
+    image = _resolve(args.image)
+    if not image.exists():
+        ui.fail(f"no such image: {image}")
+        return EXIT_ERROR
+    record = load_record(_resolve(args.record))
+    out = _resolve(args.output) if args.output else image.with_name(image.stem + ".c2pa" + image.suffix)
+    if out.resolve() == image.resolve():
+        ui.fail("refusing to overwrite the source image")
+        return EXIT_ERROR
+    try:
+        signed = embed_record_reference(
+            image.read_bytes(),
+            record,
+            cert_chain_pem=read_pem(_resolve(args.cert_chain)),
+            private_key_pem=read_pem(_resolve(args.key)),
+            alg=args.alg,
+            title=image.name,
+        )
+    except C2paWriteError as exc:
+        ui.fail(str(exc))
+        return EXIT_ERROR
+    out.write_bytes(signed)
+    ui.ok(f"wrote {out} ({len(signed):,} bytes) with an org.faceproof.record assertion")
+    ui.info("the embedded file has a NEW sha256; the record still describes the original bytes")
+    ui.info("a self-made certificate yields an UNTRUSTED signer: only a C2PA Trust List certificate is trusted")
+    return EXIT_OK
+
+
+def cmd_c2pa_check(args: argparse.Namespace) -> int:
+    from .evidence.record import load_record
+    from .verification.c2pa_check import inspect_content_credentials
+
+    settings = _settings(args)
+    ui = _console(args)
+    image = _resolve(args.image)
+    if not image.exists():
+        ui.fail(f"no such image: {image}")
+        return EXIT_ERROR
+    cc = inspect_content_credentials(image.read_bytes(), trust_anchors_pem=_trust_pem(settings))
+    ui.header("C2PA Content Credentials")
+    ui.field("state", cc.state)
+    ui.field("signer", cc.signer_common_name or cc.issuer or "(none)")
+    ui.field("trusted by configured anchors", "yes" if cc.trusted else "no (absence of a trust list means no)")
+    ui.field("claim generator", cc.claim_generator or "(none)")
+    ui.field("declares generative AI", "yes (a statement by the signer)" if cc.ai_generated else "no declaration")
+    if cc.state == "absent":
+        ui.info("absence proves nothing: screenshots and re-encoding strip manifests")
+    if args.record:
+        stored = str(load_record(_resolve(args.record))["integrity"]["verification_hash"]).lower()
+        embedded = cc.faceproof_record_hash.lower()
+        ui.field("record hash in the file", embedded or "(none)")
+        if cc.state == "valid" and embedded == stored:
+            ui.ok("the embedded manifest references exactly this record")
+            return EXIT_OK
+        ui.fail("the file does not carry a valid manifest referencing this record")
+        return 2
+    return EXIT_OK
+
+
+def cmd_ots_upgrade(args: argparse.Namespace) -> int:
+    from .anchors import OtsError, upgrade_anchor
+    from .evidence.record import load_record, save_record
+
+    ui = _console(args)
+    path = _resolve(args.record)
+    record = load_record(path)
+    anchor = record.get("anchor") or {}
+    if anchor.get("mode") != "opentimestamps":
+        ui.fail("this record has no OpenTimestamps anchor")
+        return EXIT_ERROR
+    ui.step("Asking the calendars for Bitcoin attestations (sends only commitments already in the proof)")
+    try:
+        new_anchor, upgraded = upgrade_anchor(anchor)
+    except OtsError as exc:
+        ui.fail(str(exc))
+        return EXIT_ERROR
+    record["anchor"] = new_anchor
+    save_record(record, path)
+    if new_anchor["status"] == "bitcoin_attested":
+        ui.ok(f"upgraded {upgraded} attestation(s): the proof now commits to a Bitcoin block")
+    else:
+        ui.info("still pending: the calendars have not seen a Bitcoin confirmation yet. Try again later.")
+    return EXIT_OK
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +541,14 @@ def cmd_tamper_demo(args: argparse.Namespace) -> int:
 
     settings = _settings(args)
     ui = _console(args)
+
+    if args.suite == "attestation":
+        from .tamper_suite import run_attestation_tamper_suite
+
+        if not args.image or not _resolve(args.image).exists():
+            ui.fail("--suite attestation needs --image <an image file>")
+            return EXIT_ERROR
+        return run_attestation_tamper_suite(settings, _resolve(args.image), ui)
 
     source = _resolve(args.record)
     if not source.exists():
@@ -953,6 +1104,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="single: one transaction per record (default). batch: seal now, anchor many "
         "records later with ONE Merkle-root transaction (see 'anchor-batch')",
     )
+    register.add_argument("--sign", action="store_true", help="sign the record with SIGNING_KEY_FILE (Ed25519)")
+    register.add_argument(
+        "--anchor",
+        choices=("chain", "ots", "none"),
+        default="chain",
+        help="where to anchor: chain (EVM registry, default, kept for compatibility), ots (OpenTimestamps on "
+        "Bitcoin: no wallet, no gas; recommended), none (seal only). See docs/DECISIONS.md D1",
+    )
+    register.add_argument(
+        "--consent-timestamp-calendars",
+        action="store_true",
+        help="allow sending the 32-byte record hash to OpenTimestamps calendar servers (--anchor ots)",
+    )
     register.set_defaults(func=cmd_register)
 
     # -- search ------------------------------------------------------------
@@ -1041,6 +1205,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print a machine-readable result on stdout (progress goes to stderr)",
     )
+    verify.add_argument(
+        "--trusted-key",
+        action="append",
+        default=[],
+        metavar="HEX|FILE",
+        help="require the record to be signed by this Ed25519 public key (repeatable). Without it a valid "
+        "signature proves consistency, not identity",
+    )
+    verify.add_argument(
+        "--require-image",
+        action="store_true",
+        help="fail (inconclusive) unless --image is given, so a pass always means 'this exact file'",
+    )
     verify.set_defaults(func=cmd_verify)
 
     # -- tamper-demo -------------------------------------------------------
@@ -1080,6 +1257,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also verify the untouched original, as a control",
     )
+    tamper.add_argument(
+        "--suite",
+        choices=("record", "attestation"),
+        default="record",
+        help="record: forge a face-match record (needs a chain). attestation: six forgeries of an image-only "
+        "signed record, fully offline (needs --image)",
+    )
+    tamper.add_argument("--image", default="", metavar="PATH", help="image for --suite attestation")
     tamper.set_defaults(func=cmd_tamper_demo)
 
     # -- doctor ------------------------------------------------------------
@@ -1105,6 +1290,78 @@ def build_parser() -> argparse.ArgumentParser:
     )
     batch.add_argument("records", nargs="+", metavar="RECORD", help="record files, or a directory of them")
     batch.set_defaults(func=cmd_anchor_batch)
+
+    # -- keygen / attest / ots-upgrade ------------------------------------
+    keygen = subparsers.add_parser(
+        "keygen",
+        parents=[common],
+        help="create an Ed25519 signing key for records",
+        description="Writes a new unencrypted PEM private key (refuses to overwrite) and prints its public key.",
+    )
+    keygen.add_argument(
+        "--out", required=True, metavar="PATH", help="where to write the private key (outside the repo)"
+    )
+    keygen.set_defaults(func=cmd_keygen)
+
+    attest = subparsers.add_parser(
+        "attest",
+        parents=[common],
+        help="image-only signed record: no face analysis, no search, no network by default",
+        description=(
+            "Describe a file (SHA-256, size, pHash, C2PA state, declared synthetic-media signals), seal "
+            "it, optionally sign it and timestamp it on Bitcoin via OpenTimestamps. Never touches a face."
+        ),
+    )
+    attest.add_argument("--image", required=True, metavar="PATH", help="the file to attest")
+    attest.add_argument("--sign", action="store_true", help="sign with SIGNING_KEY_FILE (Ed25519)")
+    attest.add_argument(
+        "--anchor",
+        choices=("none", "ots"),
+        default="none",
+        help="none: seal only (default; fully offline). ots: OpenTimestamps (needs --consent-timestamp-calendars)",
+    )
+    attest.add_argument(
+        "--consent-timestamp-calendars",
+        action="store_true",
+        help="allow sending the 32-byte record hash to OpenTimestamps calendar servers",
+    )
+    attest.add_argument("--note", default="", metavar="TEXT", help="free text stored in the record (max 500 chars)")
+    attest.add_argument("--output", default="", metavar="PATH", help="where to write the record")
+    attest.set_defaults(func=cmd_attest)
+
+    embed = subparsers.add_parser(
+        "c2pa-embed",
+        parents=[common],
+        help="embed a signed C2PA manifest that references a record",
+        description=(
+            "Writes <image>.c2pa.<ext> with an org.faceproof.record assertion, signed with a certificate you "
+            "supply. Does not make the signer trusted."
+        ),
+    )
+    embed.add_argument("--image", required=True, metavar="PATH")
+    embed.add_argument("--record", required=True, metavar="PATH")
+    embed.add_argument("--cert-chain", required=True, metavar="PEM", help="signing certificate, then its chain")
+    embed.add_argument("--key", required=True, metavar="PEM", help="the certificate's private key")
+    embed.add_argument("--alg", default="ES256", help="ES256 (default), ES384, ES512, PS256/384/512, ED25519")
+    embed.add_argument("--output", default="", metavar="PATH")
+    embed.set_defaults(func=cmd_c2pa_embed)
+
+    check = subparsers.add_parser(
+        "c2pa-check",
+        parents=[common],
+        help="read Content Credentials; optionally check they reference a record",
+    )
+    check.add_argument("--image", required=True, metavar="PATH")
+    check.add_argument("--record", default="", metavar="PATH")
+    check.set_defaults(func=cmd_c2pa_check)
+
+    ots_up = subparsers.add_parser(
+        "ots-upgrade",
+        parents=[common],
+        help="fetch Bitcoin attestations for a pending OpenTimestamps record",
+    )
+    ots_up.add_argument("--record", required=True, metavar="PATH")
+    ots_up.set_defaults(func=cmd_ots_upgrade)
 
     # -- purge-evidence ----------------------------------------------------
     purge = subparsers.add_parser(
@@ -1178,6 +1435,9 @@ def main(argv: list[str] | None = None) -> int:
             "NoFaceError",
             "CanonicalizationError",
             "ImageError",
+            "SigningError",
+            "OtsError",
+            "C2paWriteError",
         }
         if name in known:
             print(f"\n{name}: {exc}", file=sys.stderr)

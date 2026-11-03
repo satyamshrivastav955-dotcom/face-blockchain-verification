@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import ATTESTATION_SCHEMA
 from .blockchain.client import ChainError, EvmChainClient, build_chain_client, url_commitment
 from .config import SOCIAL_DOMAINS, ConfigError, Settings
 from .evidence.batch import BatchError, build_batch, check_record_proof, merkle_block
@@ -138,9 +139,27 @@ def run_register(
     anchor_mode: str = "single",
     output: str | Path | None = None,
     console: Console | None = None,
+    sign: bool = False,
+    anchor_backend: str = "chain",
+    consent_timestamp_calendars: bool = False,
 ) -> int:
     ui = console or Console()
     path = Path(image_path)
+    if anchor_backend not in ("chain", "ots", "none"):
+        raise ConfigError(f"unknown anchor backend {anchor_backend!r} (expected chain, ots or none)")
+    if anchor_backend == "ots" and not consent_timestamp_calendars:
+        ui.fail("a timestamp needs third-party calendar servers; pass --consent-timestamp-calendars")
+        ui.info("what would be sent: the 32-byte record hash only - never the image, a face or a URL")
+        ui.info("nothing has been sent")
+        return EXIT_ERROR
+    signing_key = None
+    if sign:
+        from .trust import load_private_key
+
+        if not settings.signing_key_file:
+            ui.fail("--sign needs a key: set SIGNING_KEY_FILE or run 'keygen --out <path>' first")
+            return EXIT_ERROR
+        signing_key = load_private_key(settings.signing_key_file)
     limit = max_candidates or settings.max_candidates
     settings.validate()
 
@@ -510,7 +529,37 @@ def run_register(
     ui.field("evidence type", best.evidence_type)
     ui.field("verification hash", verification_hash)
 
+    if signing_key is not None:
+        from .trust import sign_record
+
+        sign_record(record, signing_key)
+        ui.ok(f"record signed with key {record['signature']['key_id']} (Ed25519)")
+
     # -- stage 6: anchor ---------------------------------------------------
+    if anchor_backend in ("ots", "none"):
+        out_path = Path(output) if output else (settings.output_dir / "verification.json")
+        if anchor_backend == "ots":
+            from .anchors import DEFAULT_CALENDARS, OtsError, submit_digest
+
+            ui.step("Timestamping with OpenTimestamps (sends only the record hash)")
+            calendars = [c.strip() for c in settings.ots_calendars.split(",") if c.strip()] or list(DEFAULT_CALENDARS)
+            try:
+                record["anchor"] = submit_digest(verification_hash, calendars)
+            except OtsError as exc:
+                ui.fail(str(exc))
+                return EXIT_ERROR
+            ui.ok(f"accepted by {len(record['anchor']['calendars'])} calendar(s); status: pending")
+            ui.info("Bitcoin confirmation takes hours: run 'ots-upgrade --record <file>' later")
+        else:
+            ui.step("Anchoring skipped (--anchor none): the record is sealed but has no time evidence")
+        save_record(record, out_path)
+        bundle.write_json("verification.json", record)
+        bundle.finalize()
+        ui.step("Done")
+        ui.field("record", str(out_path))
+        ui.field("evidence", str(bundle.dir))
+        return EXIT_OK
+
     if anchor_mode == "batch":
         ui.step("Anchoring deferred (Merkle batch)")
         ui.info("this record is sealed but NOT anchored yet; it will be anchored with others in one transaction")
@@ -579,6 +628,9 @@ def run_verify(
     evidence_dir: str | Path | None = None,
     console: Console | None = None,
     report: dict[str, Any] | None = None,
+    trusted_keys: list[str] | None = None,
+    require_image: bool = False,
+    ots_header_fetcher: Any = None,
 ) -> int:
     """Verify a record. Returns an exit code and fills *report* (if given).
 
@@ -591,13 +643,16 @@ def run_verify(
     report = report if report is not None else {}
     checks: dict[str, dict[str, str]] = {
         "local_integrity": _check("skipped"),
+        "signature": _check("skipped", "record is unsigned"),
         "image_binding": _check("skipped", "not requested (pass --image)"),
         "evidence_bundle": _check("skipped", "not requested (pass --evidence-dir)"),
         "merkle_inclusion": _check("skipped", "not a batch-anchored record"),
         "chain_anchor": _check("skipped"),
         "url_commitment": _check("skipped"),
     }
-    report.update({"checks": checks, "simulated": False, "test_only": False, "anchor_mode": "single"})
+    report.update(
+        {"checks": checks, "simulated": False, "test_only": False, "anchor_mode": "single", "bound_to_image": False}
+    )
 
     def finish(status: Status, *, message: str = "") -> int:
         report["verdict"] = _VERDICT_NAMES[status]
@@ -665,8 +720,43 @@ def run_verify(
             return finish(Status.LOCAL_HASH_MISMATCH)
         checks["image_binding"] = _check("pass", "image file matches source_image.sha256")
         ui.ok("the record describes exactly this image file")
+    elif require_image:
+        checks["image_binding"] = _check("error", "required (--require-image) but no --image was given")
+        ui.fail("image binding is required but no --image was given")
+        ui.info("without it this proves a record is self-consistent, not that it describes any image you hold")
+        return finish(Status.INCONCLUSIVE, message="image binding required")
     else:
         ui.step("Step 2  -  image binding NOT checked (pass --image to check it)")
+        ui.warn("this record is not bound to any image you hold; it only proves the record is unchanged")
+    report["bound_to_image"] = checks["image_binding"]["status"] == "pass"
+
+    # -- step 2a: signature --------------------------------------------------
+    from .trust import SigningError, check_signature
+
+    try:
+        sig = check_signature(record, check.recomputed_hash, trusted_keys)
+    except SigningError as exc:
+        checks["signature"] = _check("error", str(exc)[:200])
+        ui.fail(f"cannot check the signature: {exc}")
+        return finish(Status.INCONCLUSIVE, message=str(exc)[:200])
+    report["signature"] = {
+        "state": sig.state,
+        "pinned": sig.pinned,
+        "key_id": sig.key_id,
+        "public_key": sig.public_key,
+    }
+    if sig.state == "unsigned":
+        ui.step("Step 2a  -  record is unsigned (no author)")
+    elif not sig.ok:
+        checks["signature"] = _check("fail", sig.detail)
+        ui.fail(f"SIGNATURE FAILURE  -  {sig.detail}")
+        return finish(Status.LOCAL_HASH_MISMATCH)
+    else:
+        checks["signature"] = _check("pass", sig.detail)
+        ui.step("Step 2a  -  signature")
+        ui.ok(f"key {sig.key_id}: {sig.detail}")
+        if sig.pinned is None:
+            ui.warn("the signer key is not pinned; pass --trusted-key to require a known author")
 
     # -- step 2b: optional evidence bundle ---------------------------------
     if evidence_dir:
@@ -682,6 +772,18 @@ def run_verify(
             "pass", f"{bundle_check.files_checked} file(s) match the manifest and the record"
         )
         ui.ok(f"{bundle_check.files_checked} file(s) match the manifest and the record")
+
+    # -- step 3 (alternative): OpenTimestamps -------------------------------
+    if anchor.get("mode") == "opentimestamps":
+        return _verify_ots_anchor(ui, settings, check, anchor, checks, report, finish, ots_header_fetcher)
+    if record.get("schema") == ATTESTATION_SCHEMA and not anchor:
+        # An image-only attestation never touches the EVM registry; with no anchor block it has no
+        # time evidence at all. (Face-match records keep their hash-lookup behaviour: the registry
+        # is permissionless, so a record that lost its anchor block can still be found by hash.)
+        checks["chain_anchor"] = _check("fail", "record carries no anchor")
+        ui.fail("NOT ANCHORED  -  this record carries no anchor, so it has no time evidence")
+        ui.info("it can still be consistent (and signed); it just cannot show it existed by any date")
+        return finish(Status.NOT_ANCHORED)
 
     # -- step 3: the chain ------------------------------------------------
     ui.step("Step 3  -  looking the hash up on-chain")
@@ -784,6 +886,43 @@ def run_verify(
         report.setdefault("warnings", []).append("anchor block number differs from the chain")
 
     return finish(Status.OK)
+
+
+def _verify_ots_anchor(ui, settings, check, anchor, checks, report, finish, header_fetcher) -> int:
+    """Verification for a record anchored with OpenTimestamps (no chain client, no wallet)."""
+    from .anchors import DEFAULT_EXPLORERS
+    from .anchors.ots import check_ots_anchor, explorer_header_fetcher
+
+    report["anchor_mode"] = "opentimestamps"
+    ui.step("Step 3  -  OpenTimestamps proof")
+    explorers = tuple(e.strip() for e in settings.ots_explorers.split(",") if e.strip()) or DEFAULT_EXPLORERS
+    fetcher = header_fetcher or explorer_header_fetcher(explorers)
+    result = check_ots_anchor(anchor, check.recomputed_hash, header_fetcher=fetcher)
+    report["ots"] = {
+        "state": result.state,
+        "block_height": result.block_height,
+        "block_time": result.block_time,
+        "detail": result.detail,
+    }
+    checks["url_commitment"] = _check("skipped", "not applicable to an OpenTimestamps anchor")
+    if result.state == "bitcoin":
+        checks["chain_anchor"] = _check("pass", result.detail)
+        ui.ok(f"ANCHORED  -  the record hash existed by Bitcoin block {result.block_height}")
+        ui.field("block time", _fmt_ts(int(result.block_time or 0)))
+        ui.info("block header taken from public explorers; verify the .ots with your own node for full independence")
+        return finish(Status.OK)
+    if result.state == "pending":
+        checks["chain_anchor"] = _check("fail", result.detail)
+        ui.fail("PENDING  -  stamped, but not confirmed in a Bitcoin block yet")
+        ui.info("run 'ots-upgrade --record <file>' after a few hours, then verify again")
+        return finish(Status.NOT_ANCHORED)
+    if result.state == "error":
+        checks["chain_anchor"] = _check("error", result.detail)
+        ui.fail(f"cannot complete the Bitcoin check: {result.detail}")
+        return finish(Status.INCONCLUSIVE, message=result.detail[:300])
+    checks["chain_anchor"] = _check("fail", result.detail)
+    ui.fail(f"TIMESTAMP FAILURE  -  {result.detail}")
+    return finish(Status.ANCHOR_MISMATCH)
 
 
 def _verify_batch_anchor(ui, client, check, matched_url, anchor, checks, report, finish, dry_run) -> int:
@@ -919,8 +1058,14 @@ def _verdict(ui: Console, status: Status, report: dict[str, Any]) -> None:
     ui.out()
     ui.rule()
     if status is Status.OK:
-        ui.out(f"  {ui.tick} RECORD VERIFIED: UNMODIFIED, ANCHORED, URL COMMITMENT MATCHES")
-        ui.out("    Passed: hash recomputation, chain anchor, URL commitment.")
+        if report.get("anchor_mode") == "opentimestamps":
+            ui.out(f"  {ui.tick} RECORD VERIFIED: UNMODIFIED, TIMESTAMPED ON BITCOIN (OpenTimestamps)")
+        else:
+            ui.out(f"  {ui.tick} RECORD VERIFIED: UNMODIFIED, ANCHORED, URL COMMITMENT MATCHES")
+        passed = [n for n, c in checks.items() if c["status"] == "pass"]
+        ui.out(f"    Passed: {', '.join(n.replace('_', ' ') for n in passed)}.")
+        if not report.get("bound_to_image"):
+            ui.out("    NOT bound to an image: pass --image to check the record describes your file.")
         not_run = [n for n, c in checks.items() if c["status"] == "skipped"]
         if not_run:
             ui.out(f"    Not checked: {', '.join(not_run)}.")
