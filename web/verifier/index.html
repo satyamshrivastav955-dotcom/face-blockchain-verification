@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <!-- The page can only talk to two public block explorers (GET block headers). It has no way to send your files anywhere else. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src https://blockstream.info https://mempool.space; base-uri 'none'; form-action 'none'"
+    />
+    <title>FaceProof verifier: check a record in your browser</title>
+    <meta name="description" content="Verify a FaceProof record and the image it describes entirely in your browser. Nothing is uploaded." />
+    <link rel="stylesheet" href="../src/verifier/verifier.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="top">
+      <div class="wm">Face<b>Proof</b> <span>verifier</span></div>
+      <p class="priv" id="priv"><span class="dot" aria-hidden="true"></span> Files stay on this device. No upload, no account.</p>
+    </header>
+
+    <main id="main">
+      <section class="intro">
+        <h1>Is this record genuine, and is this the file it describes?</h1>
+        <p>
+          Drop a FaceProof record (<code>.json</code>) and, optionally, the image. This page recomputes the hash,
+          checks the signature and the Bitcoin timestamp, and tells you what that does and does not prove. It never
+          detects or compares a face.
+        </p>
+      </section>
+
+      <section class="drops" aria-label="Inputs">
+        <label class="drop" id="drop-record" for="record-file">
+          <span class="step">1</span>
+          <strong>Record</strong>
+          <span class="hint" id="record-name">Drop or choose a <code>.json</code> record</span>
+          <input id="record-file" type="file" accept=".json,application/json" />
+        </label>
+        <label class="drop" id="drop-image" for="image-file">
+          <span class="step">2</span>
+          <strong>Image <em>(recommended)</em></strong>
+          <span class="hint" id="image-name">Drop or choose the exact file</span>
+          <input id="image-file" type="file" accept="image/*" />
+        </label>
+      </section>
+
+      <details class="adv">
+        <summary>Require a specific signer</summary>
+        <label for="pin">Trusted Ed25519 public key (64 hex characters)</label>
+        <input id="pin" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="e.g. 3f9a... (from the record's author, out of band)" />
+        <p class="muted">A valid signature alone proves a key signed the record, not whose key it is. Pinning checks it is the key you expect.</p>
+      </details>
+
+      <div class="actions">
+        <button id="run" type="button" disabled>Verify</button>
+        <button id="clear" type="button" class="ghost">Clear</button>
+      </div>
+
+      <section id="result" class="result" aria-live="polite" hidden></section>
+
+      <section class="net" aria-labelledby="net-h">
+        <h2 id="net-h">What this page sent over the network</h2>
+        <p class="muted">Only GET requests for public Bitcoin block headers, and only when a record carries a Bitcoin timestamp. Nothing here contains your files.</p>
+        <ul id="netlog"><li class="none">No requests yet.</li></ul>
+      </section>
+
+      <section class="limits">
+        <h2>What a pass does not mean</h2>
+        <ul>
+          <li>It does not prove the image is real, unedited before it was recorded, or who made it.</li>
+          <li>A signature proves a key signed the record; it says nothing about who holds the key unless you pinned it.</li>
+          <li>A Bitcoin timestamp proves the record hash existed by that block, not when the picture was taken.</li>
+          <li>It checks the exact file bytes. A resized, re-encoded or screenshotted copy will not match, by design.</li>
+          <li>Records anchored on an EVM registry can only be checked with the command-line tool.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="foot">FaceProof · open source · <span id="env"></span></footer>
+    <script type="module" src="../src/verifier/main.ts"></script>
+  </body>
+</html>

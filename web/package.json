@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:verifier": "tsc --noEmit && vite build --config vite.verifier.config.ts",
+    "dev:verifier": "vite --config vite.verifier.config.ts",
+    "test": "node --test test/core.test.ts"
   },
   "dependencies": {
     "react": "^19.3.1",
