@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Page Not Found — FaceProof</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <style>
+    :root {
+      --bg: #fbf8f2;
+      --card: #f5efe0;
+      --ink: #211c16;
+      --muted: #7a6f5d;
+      --rule: #d2c7ae;
+      --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+      --mono: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--serif);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+    }
+    .box {
+      background: var(--card);
+      border: 1px solid var(--rule);
+      padding: 48px;
+      max-width: 480px;
+      box-shadow: 0 4px 12px rgba(33, 28, 22, 0.05);
+    }
+    h1 {
+      font-size: 32px;
+      margin: 0 0 16px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+    p {
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+    a {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: #24364f;
+      text-decoration: none;
+      border: 1px solid var(--rule);
+      padding: 8px 16px;
+      background: #faf6ea;
+      transition: background 0.15s;
+    }
+    a:hover {
+      background: #e9e0c9;
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>404 — Record Not Found</h1>
+    <p>The requested page or provenance artifact could not be located in this registry index.</p>
+    <a href="./">Return to FaceProof Showcase</a>
+  </div>
+</body>
+</html>
