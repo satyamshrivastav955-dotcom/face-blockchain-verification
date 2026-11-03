@@ -40,6 +40,7 @@ _MIME = (
 )
 _AI_SOURCE_TYPES = ("trainedalgorithmicmedia", "compositewithtrainedalgorithmicmedia", "algorithmicmedia")
 MAX_LIST = 20
+FACEPROOF_ASSERTION = "org.faceproof.record"
 
 
 @dataclass
@@ -55,6 +56,8 @@ class ContentCredentials:
     actions: list[str] = field(default_factory=list)
     ai_generated: bool = False
     ingredients: int = 0
+    trusted: bool = False  # the signer chains to a configured trust anchor (never true by default)
+    faceproof_record_hash: str = ""  # from an org.faceproof.record assertion, if present
     failure_codes: list[str] = field(default_factory=list)
     detail: str = ""
 
@@ -72,6 +75,8 @@ class ContentCredentials:
             "actions": self.actions[:MAX_LIST],
             "ai_generated": bool(self.ai_generated),
             "ingredients": int(self.ingredients),
+            "trusted": bool(self.trusted),
+            "faceproof_record_hash": self.faceproof_record_hash,
             "failure_codes": self.failure_codes[:MAX_LIST],
             "detail": self.detail[:160],
         }
@@ -112,7 +117,12 @@ def summarise_manifest_store(store: dict[str, Any]) -> ContentCredentials:
     out.claim_generator = ", ".join(names) or str(manifest.get("claim_generator", ""))
     out.ingredients = len(manifest.get("ingredients") or [])
 
+    out.trusted = out.validation_state.lower() == "trusted"
     for assertion in manifest.get("assertions") or []:
+        if isinstance(assertion, dict) and assertion.get("label") == FACEPROOF_ASSERTION:
+            value = str((assertion.get("data") or {}).get("verification_hash", ""))
+            out.faceproof_record_hash = value if _is_hash(value) else ""
+            continue
         if not isinstance(assertion, dict) or not str(assertion.get("label", "")).startswith("c2pa.actions"):
             continue
         for action in (assertion.get("data") or {}).get("actions", []) or []:
@@ -127,8 +137,26 @@ def summarise_manifest_store(store: dict[str, Any]) -> ContentCredentials:
     return out
 
 
-def inspect_content_credentials(data: bytes) -> ContentCredentials:
-    """Read C2PA Content Credentials from image bytes. Never raises."""
+def _is_hash(value: str) -> bool:
+    return len(value) == 66 and value.startswith("0x") and all(c in "0123456789abcdefABCDEF" for c in value[2:])
+
+
+def _trust_context(trust_anchors_pem: str | None):
+    """A c2pa Context that validates signer chains against *trust_anchors_pem* (PEM bundle), or None."""
+    if not trust_anchors_pem:
+        return None
+    import c2pa
+
+    return c2pa.Context.from_dict({"trust": {"trust_anchors": trust_anchors_pem}, "verify": {"verify_trust": True}})
+
+
+def inspect_content_credentials(data: bytes, trust_anchors_pem: str | None = None) -> ContentCredentials:
+    """Read C2PA Content Credentials from image bytes. Never raises.
+
+    With ``trust_anchors_pem`` (e.g. the official C2PA Trust List, which this project does not bundle or
+    download) a signer whose chain reaches one of those anchors is reported ``trusted``; otherwise the
+    manifest is at best ``valid`` with ``untrusted_signer`` set. Trust is the caller's policy.
+    """
     mime = _mime(data)
     if not mime:
         return ContentCredentials(state="unsupported_format", detail="C2PA reading supports JPEG, PNG, WebP, GIF here")
@@ -137,7 +165,10 @@ def inspect_content_credentials(data: bytes) -> ContentCredentials:
     except ImportError:
         return ContentCredentials(state="unavailable", detail="c2pa-python is not installed")
     try:
-        reader = c2pa.Reader(mime, io.BytesIO(data))
+        context = _trust_context(trust_anchors_pem)
+        reader = (
+            c2pa.Reader(mime, io.BytesIO(data), context=context) if context else c2pa.Reader(mime, io.BytesIO(data))
+        )
         store = json.loads(reader.json())
     except Exception as exc:  # noqa: BLE001 - the SDK raises on "no manifest" as well as on corruption
         text = str(exc).lower()
