@@ -1,0 +1,19 @@
+# Both services publish on loopback only. The API has no authentication: do not change 127.0.0.1 unless
+# an authenticating proxy sits in front. Models are not baked in: run `python scripts/fetch_models.py`
+# inside the container (or mount ./models) before real runs.
+services:
+  verifier:
+    build: { context: ., dockerfile: deploy/Dockerfile.verifier }
+    ports: ["127.0.0.1:8080:8080"]
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+  api:
+    build: { context: ., dockerfile: deploy/Dockerfile.api }
+    ports: ["127.0.0.1:8765:8765"]
+    volumes: ["faceproof-data:/data"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+volumes:
+  faceproof-data:
