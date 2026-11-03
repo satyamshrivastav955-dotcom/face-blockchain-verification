@@ -93,6 +93,10 @@ python -m src.web            # http://127.0.0.1:8765, loopback only
 python -m src.web --demo     # adds the stub engine + synthetic fixture, labelled on every screen
 ```
 
+### Public showcase website
+
+The local web app above is strictly local-first and loopback-only. For public presentation, a decoupled static showcase website is located in [`showcase/`](showcase/) and configured for GitHub Pages deployment. It contains zero backend dependencies, zero private credentials, and communicates architectural concepts and benchmarks cleanly. See [docs/SHOWCASE_DEPLOYMENT.md](docs/SHOWCASE_DEPLOYMENT.md).
+
 ## The pipeline
 
 <div align="center">
@@ -283,7 +287,7 @@ python scripts/capture_screenshots.py                  # regenerate screenshots 
 
 As of 2026-10-30 (Python 3.13.13, Windows 11): **695 tests pass** with the dev extras (in-process EVM, real model weights, web API, C2PA); **665 pass, 1 skipped** in a clean environment from `requirements.txt` alone (the EVM module skips with a reason). Coverage includes every match outcome and boundary, deterministic selection, fail-closed verification, SSRF/redirect/size/decode limits, consent gates and secret redaction, record and bundle tampering, RFC 8785 vectors with a JavaScript cross-check, RFC 6962 reference values, contract behaviour (duplicates, zero values, v1/v2/v3 detection, calldata and events, gas), SCRFD decode and alignment, geometric verification, C2PA (including a real signed sample and a tampered copy) and download concurrency.
 
-`.github/workflows/ci.yml` runs lint, format, mypy, tests and contract compilation on Python 3.11–3.13 plus the frontend build, with no secrets and no `continue-on-error`. **It has not been run on GitHub.** `ruff format` is enforced for new or rewritten files; older modules are listed as exclusions in `pyproject.toml`.
+`.github/workflows/ci.yml` runs lint, format, mypy, tests and contract compilation on Python 3.11–3.13 plus the frontend build, with no secrets and no `continue-on-error`. In previous CI runs, frontend build and Python 3.12/3.13 succeeded while Python 3.11 failed during pip install due to `numpy==2.5.4` requiring Python >= 3.12; `constraints.txt` was subsequently patched to `numpy==2.2.6` to restore full Python 3.11–3.13 matrix compatibility. `ruff format` is enforced for new or rewritten files; older modules are listed as exclusions in `pyproject.toml`.
 
 | Document | What is in it |
 |---|---|
@@ -291,6 +295,11 @@ As of 2026-10-30 (Python 3.13.13, Windows 11): **695 tests pass** with the dev e
 | [docs/EVALUATION.md](docs/EVALUATION.md) | Benchmarks, stress tests, thresholds, and every caveat |
 | [docs/RECORD_FORMAT.md](docs/RECORD_FORMAT.md) | Record schema, algorithm labels, anchor modes, bundles, migration |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Registry v2/v3, manual deployment, migration from v1 |
+| [docs/BASE_SEPOLIA_RELEASE.md](docs/BASE_SEPOLIA_RELEASE.md) | Base Sepolia deployment guide, burner wallet, and verification checklist |
+| [docs/SHOWCASE_DEPLOYMENT.md](docs/SHOWCASE_DEPLOYMENT.md) | GitHub Pages showcase architecture and manual deployment guide |
+| [docs/LAUNCH_CHECKLIST.md](docs/LAUNCH_CHECKLIST.md) | Complete pre-flight and release verification checklist |
+| [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) | v2.0.0 capabilities, migration, and known boundaries |
+| [docs/articles/faceproof-engineering-story.md](docs/articles/faceproof-engineering-story.md) | Publication-quality deep dive technical article |
 
 ## What is not done, and what is not claimed
 
@@ -298,8 +307,8 @@ As of 2026-10-30 (Python 3.13.13, Windows 11): **695 tests pass** with the dev e
 * **Face matching is measured on LFW only.** No IJB-C / CFP-FP / AgeDB, no demographic breakdown, one machine. Thresholds are indicative, not calibrated for any population.
 * **Geometric verification is validated on synthetic images.** Real photographs may produce false matches (repeated structure, text, logos).
 * **One search-provider path is verified end to end** (offline fixture); live SerpApi/TinEye calls need your keys and were not exercised here.
-* **The web app is a single-user local tool:** no accounts, no persistence beyond an hour, no hosting setup.
-* **CI has not run on GitHub;** Python 3.10–3.12 were not tested locally.
+* **The web app is a single-user local tool:** no accounts, no persistence beyond an hour, no hosting setup. The public website is a static showcase on GitHub Pages.
+* **Smart contract deployment is manual;** testnet funds are never spent automatically.
 * **There is no `LICENSE` file.** The contract carries an MIT SPDX tag, which does not license the rest. Choosing a licence is the owner's decision. Third-party: OpenCV (Apache-2.0); OpenCV Zoo YuNet (MIT) and SFace (Apache-2.0); InsightFace weights (**non-commercial research**); c2pa-python, web3.py and others under their own licences.
 * Use only images you have the right to process and obtain consent from the people shown. Do not use this to identify, track or profile anyone. A record is not legal proof of anything.
 
