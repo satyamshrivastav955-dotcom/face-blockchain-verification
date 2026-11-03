@@ -1,0 +1,65 @@
+name: Deploy Showcase to GitHub Pages
+
+# Deploys the independent static showcase website to GitHub Pages.
+# It does NOT deploy the local FastAPI verification server, does not expose
+# any API keys, .env, face models, or local evidence bundles.
+
+on:
+  workflow_dispatch: # Intentional manual deployment trigger
+  push:
+    branches: [main]
+    paths:
+      - "showcase/**"
+      - ".github/workflows/deploy-showcase.yml"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Static Showcase
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: showcase
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: showcase/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build static site
+        run: npm run build
+        env:
+          VITE_BASE_PATH: /face-blockchain-verification/
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: showcase/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
