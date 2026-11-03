@@ -37,6 +37,8 @@ input/*
 # ---- Web frontend ----
 /web/node_modules/
 /web/dist/
+/showcase/node_modules/
+/showcase/dist/
 .ruff_cache/
 
 # ---- Face-model weights and evaluation data (licences differ; never commit) ----
