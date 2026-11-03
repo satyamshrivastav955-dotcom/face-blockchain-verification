@@ -14,7 +14,7 @@
 **Image provenance, kept on file.**<br/>
 Seal a signed, time-stamped description of an image that anyone can check in their own browser without trusting you, and never claim to know who is in it. Optionally, trace where an image appeared and say plainly whether a hit is a *face match* or only *image similarity*.
 
-[Landing page](#the-app) · [Pipeline](#the-pipeline) · [Measured results](#measured-results) · [Quickstart](#quickstart) · [CLI](#cli) · [Security](#security-and-privacy) · [Limits](#what-is-not-done-and-what-is-not-claimed)
+[**Live showcase**](https://satyamshrivastav955-dotcom.github.io/face-blockchain-verification/) · [Landing page](#the-app) · [Pipeline](#the-pipeline) · [Measured results](#measured-results) · [Quickstart](#quickstart) · [CLI](#cli) · [Security](#security-and-privacy) · [Limits](#what-is-not-done-and-what-is-not-claimed)
 
 </div>
 
