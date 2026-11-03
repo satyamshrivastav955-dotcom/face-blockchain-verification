@@ -1,0 +1,468 @@
+{
+  "protocol": "LFW source photos; 12 transformations as positives; unrelated and same-person photos as negatives",
+  "seed": 20261103,
+  "sources": 300,
+  "phash_max_distance": 12,
+  "environment": {
+    "python": "3.13.13",
+    "opencv": "5.0.0",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "processor": "Intel64 Family 6 Model 191 Stepping 2, GenuineIntel"
+  },
+  "wall_seconds": 111.9,
+  "positives": {
+    "identical copy": {
+      "phash": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "geo": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "jpeg q50": {
+      "phash": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "geo": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "jpeg q20": {
+      "phash": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "geo": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "resize 50%": {
+      "phash": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "geo": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "resize 25%": {
+      "phash": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "geo": {
+        "k": 255,
+        "n": 300,
+        "rate": 0.85,
+        "ci95": [
+          0.8052,
+          0.886
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "blur sigma 2": {
+      "phash": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "geo": {
+        "k": 292,
+        "n": 300,
+        "rate": 0.9733333333333334,
+        "ci95": [
+          0.9483,
+          0.9864
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "brightness +30": {
+      "phash": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "geo": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "crop 90%": {
+      "phash": {
+        "k": 213,
+        "n": 300,
+        "rate": 0.71,
+        "ci95": [
+          0.6563,
+          0.7584
+        ]
+      },
+      "geo": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "crop 70%": {
+      "phash": {
+        "k": 0,
+        "n": 300,
+        "rate": 0.0,
+        "ci95": [
+          0.0,
+          0.0126
+        ],
+        "upper_bound_rule_of_three": 0.01
+      },
+      "geo": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "rotate 10 deg": {
+      "phash": {
+        "k": 63,
+        "n": 300,
+        "rate": 0.21,
+        "ci95": [
+          0.1677,
+          0.2596
+        ]
+      },
+      "geo": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "mirror": {
+      "phash": {
+        "k": 0,
+        "n": 300,
+        "rate": 0.0,
+        "ci95": [
+          0.0,
+          0.0126
+        ],
+        "upper_bound_rule_of_three": 0.01
+      },
+      "geo": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "either": {
+        "k": 300,
+        "n": 300,
+        "rate": 1.0,
+        "ci95": [
+          0.9874,
+          1.0
+        ]
+      },
+      "n": 300
+    },
+    "screenshot-like": {
+      "phash": {
+        "k": 2,
+        "n": 300,
+        "rate": 0.006666666666666667,
+        "ci95": [
+          0.0018,
+          0.024
+        ]
+      },
+      "geo": {
+        "k": 297,
+        "n": 300,
+        "rate": 0.99,
+        "ci95": [
+          0.971,
+          0.9966
+        ]
+      },
+      "either": {
+        "k": 297,
+        "n": 300,
+        "rate": 0.99,
+        "ci95": [
+          0.971,
+          0.9966
+        ]
+      },
+      "n": 300
+    }
+  },
+  "negatives": {
+    "unrelated": {
+      "phash": {
+        "k": 0,
+        "n": 600,
+        "rate": 0.0,
+        "ci95": [
+          0.0,
+          0.0064
+        ],
+        "upper_bound_rule_of_three": 0.005
+      },
+      "geo": {
+        "k": 0,
+        "n": 600,
+        "rate": 0.0,
+        "ci95": [
+          0.0,
+          0.0064
+        ],
+        "upper_bound_rule_of_three": 0.005
+      },
+      "either": {
+        "k": 0,
+        "n": 600,
+        "rate": 0.0,
+        "ci95": [
+          0.0,
+          0.0064
+        ],
+        "upper_bound_rule_of_three": 0.005
+      },
+      "n": 600,
+      "min_phash_distance_seen": 16,
+      "max_geometric_inliers_seen": 14
+    },
+    "same person, different photo": {
+      "phash": {
+        "k": 1,
+        "n": 83,
+        "rate": 0.012048192771084338,
+        "ci95": [
+          0.0021,
+          0.0651
+        ]
+      },
+      "geo": {
+        "k": 1,
+        "n": 83,
+        "rate": 0.012048192771084338,
+        "ci95": [
+          0.0021,
+          0.0651
+        ]
+      },
+      "either": {
+        "k": 1,
+        "n": 83,
+        "rate": 0.012048192771084338,
+        "ci95": [
+          0.0021,
+          0.0651
+        ]
+      },
+      "n": 83,
+      "min_phash_distance_seen": 6,
+      "max_geometric_inliers_seen": 31
+    }
+  },
+  "false_accept_examples": [
+    {
+      "class": "same person, different photo",
+      "source": "lfw_home\\lfw\\Mikhail_Kasyanov\\Mikhail_Kasyanov_0004.jpg",
+      "candidate": "lfw_home\\lfw\\Mikhail_Kasyanov\\Mikhail_Kasyanov_0003.jpg",
+      "phash_distance": 6,
+      "geometric_inliers": 31
+    }
+  ],
+  "exact_sha256_binding": {
+    "edited_copies_accepted_as_the_original": {
+      "k": 0,
+      "n": 3300,
+      "rate": 0.0,
+      "ci95": [
+        0.0,
+        0.0012
+      ],
+      "upper_bound_rule_of_three": 0.0009
+    },
+    "note": "SHA-256 of the pixel arrays; any transformation changes it. Exact binding has no tolerance."
+  }
+}

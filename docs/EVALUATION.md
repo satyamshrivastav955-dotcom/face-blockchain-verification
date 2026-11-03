@@ -125,6 +125,8 @@ rotation, mirroring, JPEG q15, blur, an overlay) against at most 7 for unrelated
 inliers and ratio 0.30. That is a mechanism check: **real photographs have repeated structure (text, logos,
 facades) that can produce spurious matches, and this has not been measured on real-image negatives.**
 
+> **Update 2026-11-03:** now measured on real photographs (300 LFW sources, 683 negatives): see `BENCHMARKS.md` B7. 0 of 600 unrelated photos accepted; geometric recall 85-100% depending on the edit. Repeated-structure content (text, logos, facades) is still unmeasured.
+
 ## 2c. Other measurements
 
 | Measurement | Result |
