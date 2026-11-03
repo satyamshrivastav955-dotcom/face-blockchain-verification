@@ -22,6 +22,7 @@ is no service-level commitment.
 * Consent gates and secret redaction (`src/privacy.py`, `src/main.py`, provider modules)
 * Record, canonicalization and bundle integrity (`src/evidence/`)
 * The registry contract and its client (`contracts/`, `src/blockchain/`)
+* Signing and anchoring (`src/trust/`, `src/anchors/`), the C2PA bridge (`src/verification/c2pa_*.py`) and the static verifier (`web/src/verifier/`, `web/verifier/`): see `docs/THREAT_MODEL.md` for the known weak points
 * The local web API (`src/web/`): host/origin checks, upload handling, temp-file lifecycle
 
 ## What is out of scope

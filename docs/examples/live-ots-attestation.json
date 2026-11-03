@@ -1,0 +1,76 @@
+{
+  "anchor": {
+    "calendars": [
+      "https://alice.btc.calendar.opentimestamps.org",
+      "https://bob.btc.calendar.opentimestamps.org",
+      "https://finney.calendar.eternitywall.com"
+    ],
+    "digest": "92e053346390a1390c515d197d7559e83cb148c98c120062b464145e813328d4",
+    "mode": "opentimestamps",
+    "ots": "AE9wZW5UaW1lc3RhbXBzAABQcm9vZgC/ieLohOiSlAEIkuBTNGOQoTkMUV0ZfXVZ6DyxSMmMEgBitGQUXoEzKNT/8Agk5DDqOy55GAjwEIDpqo4FQ0XgXAIVNBOg1nUI8CAkz/68fiXsk8eI87Cojw7Wg5cjH2nGi+bxgecobK0CTQjxIOaz9cLi8hNHJqFcq2MqnvhPHoXtE7E3zRrPI3L4YzGZCPEEauld7vAI5FBTQNDGLtQAg9/jDS75DI4sK2h0dHBzOi8vYm9iLmJ0Yy5jYWxlbmRhci5vcGVudGltZXN0YW1wcy5vcmf/8BAmjkTfeFyMI2b1NRpRyJPKCPEgMK+QGicjixTV8Yfq5+wu19eyns+X/k7pkLwBa2Qnf7gI8QRq6V3v8AiOOMK93Zrp+QCD3+MNLvkMjikoaHR0cHM6Ly9maW5uZXkuY2FsZW5kYXIuZXRlcm5pdHl3YWxsLmNvbfAIiKqBs3SAXpUI8BDzKp+Hpie1A0Q/Z71d/09bCPEg1GSU0N4BzUUs6rGToCEVERtewqMIW1Mtn9WwPkHp2zkI8SC+Ki4lbtwqJcXQiXXHrRpWAP5YTCO+C18cZCI/3UouTAjwIPMaYV7Ocfju7StubmHnPGQ93SWOnledGbxBQLaRjGwiCPEEauld7PAImJM7AkAo6LEAg9/jDS75DI4uLWh0dHBzOi8vYWxpY2UuYnRjLmNhbGVuZGFyLm9wZW50aW1lc3RhbXBzLm9yZw==",
+    "status": "pending",
+    "submitted_at": "2026-11-03T04:07:09Z"
+  },
+  "integrity": {
+    "algorithm": "sha256-jcs-rfc8785-restricted-v1",
+    "canonical_length": 1638,
+    "verification_hash": "0x92e053346390a1390c515d197d7559e83cb148c98c120062b464145e813328d4"
+  },
+  "payload": {
+    "claim": "A file with the SHA-256 below existed when this record was created and was described as stated. Anchored records additionally show the record hash existed by the anchor time.",
+    "created_at": "2026-11-03T04:07:03Z",
+    "limitations": [
+      "No face was detected, embedded or compared; this record says nothing about who or what is depicted.",
+      "A signature proves a key signed the record, not who holds the key or that the description is true.",
+      "An anchor proves the record hash existed by a time, not that the image was created then.",
+      "Declared synthetic-media signals come from metadata; absence of a declaration proves nothing.",
+      "A perceptual hash finds visually similar images; it is not proof of identical origin."
+    ],
+    "note": "live OpenTimestamps test on the synthetic sample image",
+    "schema": "faceproof/attestation/v1",
+    "source_image": {
+      "bytes": 29901,
+      "content_credentials": {
+        "actions": [],
+        "ai_generated": false,
+        "claim_generator": "",
+        "detail": "",
+        "faceproof_record_hash": "",
+        "failure_codes": [],
+        "ingredients": 0,
+        "issuer": "",
+        "signed_at": "",
+        "signer_common_name": "",
+        "signing_algorithm": "",
+        "state": "absent",
+        "trusted": false,
+        "untrusted_signer": false,
+        "validation_state": ""
+      },
+      "height": 256,
+      "phash": "c0403f3f3b3e3a2c",
+      "sha256": "6101b4c1691bbe5c6d28af8121a28b8085f69c2323ca20676031ca4c12044ab1",
+      "width": 256
+    },
+    "synthetic_media_signals": {
+      "absence_proves_nothing": true,
+      "is_detector": false,
+      "method": "declared-metadata-v1",
+      "note": "Declared by file metadata or by a C2PA signer; not a pixel analysis and not proof. Absence of a declaration says nothing about how the image was made.",
+      "signals": [],
+      "verdict": "no_declaration"
+    },
+    "tool": {
+      "name": "faceproof",
+      "version": "2.1.0"
+    }
+  },
+  "schema": "faceproof/attestation/v1",
+  "signature": {
+    "algorithm": "ed25519",
+    "key_id": "1367dd509c4e2d11",
+    "public_key": "402b9e9cea3a93e631f6edbd2701d96ba6a8fbbcf9d9946fcd05c366e655fa65",
+    "signature": "dd3b795fa3632af843c5b9d14117c2a679567f5fb190acfab13451324e2b0c2afc2375a31e8a79595607c10a259b23faa6b1710ebef0c502fbd3bb72810ce604",
+    "signed_hash": "0x92e053346390a1390c515d197d7559e83cb148c98c120062b464145e813328d4"
+  }
+}

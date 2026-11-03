@@ -4,6 +4,27 @@ All notable changes. Format follows [Keep a Changelog](https://keepachangelog.co
 semantic versioning for its record schema and CLI exit codes (a breaking change to either bumps the major
 version).
 
+## [2.1.0] - 2026-11-03
+
+### Added
+* **`attest`**: image-only record (SHA-256, pHash, C2PA state, declared synthetic-media metadata). No face analysis, no filename, no network by default. Schema `faceproof/attestation/v1`.
+* **Ed25519 record signatures** (`keygen`, `--sign`, `verify --trusted-key`), domain-separated, bound to the recomputed hash.
+* **OpenTimestamps anchoring** (`--anchor ots`, `ots-upgrade`): pending is never a pass; Bitcoin headers cross-checked across two explorers; unreachable explorers are inconclusive.
+* **C2PA writing** (`c2pa-embed`, `org.faceproof.record` assertion) and trust-anchor-aware reading (`c2pa-check`, `C2PA_TRUST_ANCHORS_FILE`).
+* **Static client-side verifier** (`web/verifier`, built to `web/dist-verifier`): hash, signature, image binding and OpenTimestamps in the browser, a CSP that forbids other hosts, a live network log; cross-checked against Python-generated vectors.
+* **`verify --require-image`**, and a "NOT bound to an image" notice on any pass without one.
+* **`tamper-demo --suite attestation`**: six offline forgeries.
+* **`scripts/evaluate_provenance.py`**: labelled evaluation on real photographs with Wilson intervals; results in `docs/results/provenance_eval.json`.
+* Web app: **Attest an image** page, drag-and-drop fields, signer pinning, `/api/attest`, `/verifier/` mount.
+* Docs: THREAT_MODEL, PRIVACY, DECISIONS, ROADMAP, BENCHMARKS, INTERVIEW_PACK. `deploy/` Dockerfiles and compose (unbuilt).
+
+### Changed
+* `requirements-dev.txt` no longer needs a C compiler; the in-process EVM moved to `requirements-evm.txt`; CI fails if contract tests skip.
+* `verify` reports a `signature` check and `bound_to_image`; the README test count was corrected.
+
+### Not done
+* A live OpenTimestamps submission, Docker builds, CI on GitHub, an AI-image detector (by decision), browser-side C2PA.
+
 ## [2.0.0] - 2026-10-30
 
 ### Breaking

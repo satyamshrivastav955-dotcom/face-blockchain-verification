@@ -12,7 +12,7 @@
 ![Registry v3](https://img.shields.io/badge/registry%20v3-tested%2C%20not%20deployed-7a6f5d?style=flat-square&labelColor=211c16)
 
 **Image provenance, kept on file.**<br/>
-Find where an image appeared, re-examine every lead on your own machine, say plainly whether the evidence is a *face match* or only *image similarity*, and anchor a tamper-evident hash — without putting a face, an embedding or a URL on-chain.
+Seal a signed, time-stamped description of an image that anyone can check in their own browser without trusting you, and never claim to know who is in it. Optionally, trace where an image appeared and say plainly whether a hit is a *face match* or only *image similarity*.
 
 [Landing page](#the-app) · [Pipeline](#the-pipeline) · [Measured results](#measured-results) · [Quickstart](#quickstart) · [CLI](#cli) · [Security](#security-and-privacy) · [Limits](#what-is-not-done-and-what-is-not-claimed)
 
@@ -22,6 +22,49 @@ Find where an image appeared, re-examine every lead on your own machine, say pla
 > **This is an image-provenance tool, not an identity-recognition product.** It never maps a face to a person. A record says *what the pipeline measured* and *that its hash was registered at a time*. It does not prove a claim is true, that a page is authentic, or who appears in a photograph.
 
 ---
+
+## The core: attest, then verify anywhere
+
+```bash
+python -m src.main keygen --out ~/faceproof-key.pem                 # once; keep it outside the repo
+SIGNING_KEY_FILE=~/faceproof-key.pem python -m src.main attest --image photo.jpg --sign \
+    --anchor ots --consent-timestamp-calendars                      # sends only the 32-byte record hash
+python -m src.main ots-upgrade --record output/attestation.json     # hours later: adds the Bitcoin attestation
+python -m src.main verify --record output/attestation.json --image photo.jpg --require-image --trusted-key <author public key>
+```
+
+`attest` never detects, embeds or compares a face, and works with no network at all unless you ask for a timestamp. The record holds the file's SHA-256, a pHash, the
+C2PA state, and any *declared* synthetic-media metadata. It holds no face data and no filename. A signature says which key authored it; a Bitcoin timestamp (OpenTimestamps) says the record
+existed by a block; the exact image binding says it is *that file*. Each is a separate, individually reported check, and a missing one is never a pass.
+
+<div align="center">
+<img src="assets/readme/verifier.png" alt="The static verifier page showing a verified record, four passing checks and the network log" width="620"/>
+
+<sub>The static verifier (<code>web/dist-verifier</code>), checking the generated <i>test vectors</i> (a test key and a <b>fabricated</b> block header, not real evidence). It runs entirely in the browser; the log lists every request it made.</sub>
+</div>
+
+**Tamper demonstration** (offline, real code, six forgeries, exit 0 only if all are rejected):
+
+```bash
+python -m src.main tamper-demo --suite attestation --image tests/data/query.png
+```
+
+```text
+  [OK] control                  CONTROL   hash, signature and image all pass
+  [OK] 1 naive edit             REJECTED  [local_integrity] the payload does not match its stored hash
+  [OK] 2 re-sealed edit         REJECTED  [signature] signature covers a different hash than the payload now has
+  [OK] 3 forged by another key  REJECTED  [signature] valid signature, but by a key that is not in the trusted set (...)
+  [OK] 4 one pixel edited       REJECTED  [image_binding] image digest differs from the record
+  [OK] 5 re-encoded copy        REJECTED  [image_binding] image digest differs ... (pHash distance 10/64: visually the same, not the attested bytes)
+  [OK] 6 signature stripped     REJECTED  [signature] a trusted key was required but the record is unsigned
+```
+
+**Measured, on real photographs** (300 LFW sources; full tables, intervals and limits in [BENCHMARKS.md](BENCHMARKS.md) B7). The 12-way mean is not reported; read the table, not a headline.
+The near-copy test (pHash OR geometric) accepted **every edited copy at >= 99%** for all 12 transformations (identical, JPEG q50/q20, resize 50%/25%, blur, brightness, crop 90%/70%, rotate 10 degrees, mirror, screenshot-like re-capture; 99.0% [97.1, 99.7] for the screenshot-like one, 100% for the rest),
+and accepted **0 of 600 unrelated photos** (95% upper bound about 0.5%). pHash alone misses crops, rotations, mirrors and screenshots; the geometric stage is what recovers them. Exact SHA-256 binding accepted 0 of 3,300 edited copies, by design.
+This says nothing about phone photos, screenshots of text or UI, logos or repeated textures (where false matches are likeliest), or stacked edits.
+
+Threat model: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). Privacy and legal posture (incl. India's DPDP Act, from secondary sources): [docs/PRIVACY.md](docs/PRIVACY.md).
 
 ## At a glance
 
@@ -207,10 +250,13 @@ Without consent the command prints what *would* be sent and stops — `nothing h
 
 | Command | Purpose |
 |---|---|
-| `register` | Full pipeline; `--engine`, `--anchor-mode single\|batch`, `--require-face-match`, `--minimal-evidence`, consent flags |
+| `keygen` · `attest` | Create an Ed25519 key; seal an image-only record (no face, no network by default), optionally `--sign` and `--anchor ots` |
+| `ots-upgrade` | Fetch the Bitcoin attestation for a pending OpenTimestamps record |
+| `c2pa-embed` · `c2pa-check` | Embed a signed C2PA manifest that references a record; read Content Credentials (with your own trust anchors) |
+| `register` | Full pipeline (face trace); `--engine`, `--anchor-mode single\|batch`, `--require-face-match`, `--minimal-evidence`, consent flags |
 | `anchor-batch` | One Merkle-root transaction for many sealed records (needs registry v3) |
 | `verify` | Recompute, bind to an image, check the bundle, look up the chain; `--json` for machines |
-| `tamper-demo` | Shows both forgery classes: naive edit (caught offline) and re-sealed edit (caught by the ledger) |
+| `tamper-demo` | `--suite record`: naive vs re-sealed edit (needs a ledger). `--suite attestation --image X`: six offline forgeries |
 | `search` | Search stage only |
 | `doctor` | Readiness; never prints a secret |
 | `purge-evidence` | Delete old local bundles (dry run by default) |
@@ -267,6 +313,9 @@ Loopback by default; `Host`/`Origin` checks; uploads ≤ 10 MiB validated as bou
 | `PUBLISH_PROVIDER` | `none` | public image host, only with `--consent-public-upload` |
 | `RPC_URL` · `CHAIN_ID` · `CHAIN_NAME` · `EXPLORER_BASE` | Base Sepolia | target chain; chain-id mismatch is refused |
 | `PRIVATE_KEY` | – | **burner** key; only for deploy/register, never for verification |
+| `SIGNING_KEY_FILE` | – | Ed25519 PEM used by `--sign` (outside the repo) |
+| `OTS_CALENDARS` · `OTS_EXPLORERS` | public defaults | OpenTimestamps calendars; block-explorer APIs for header checks |
+| `C2PA_TRUST_ANCHORS_FILE` | – | PEM of C2PA trust anchors you downloaded; empty = no signer is ever trusted |
 | `CONTRACT_ADDRESS` | – | a registry v2 or v3 deployment (v1 is detected and rejected) |
 | `FACE_COSINE_THRESHOLD` | per engine | if unset, each engine's benchmarked default (SFace 0.363, R50 0.25, R100 0.28) |
 | `PHASH_MAX_DISTANCE` | `12` | 0–64 |
@@ -278,19 +327,26 @@ Loopback by default; `Host`/`Origin` checks; uploads ≤ 10 MiB validated as bou
 
 ```bash
 python -m pytest tests -q                              # hermetic: no network, keys, wallet or gas
-pip install -r requirements-dev.txt                    # + ruff, mypy, eth-tester (in-process EVM)
+pip install -r requirements-dev.txt                    # + pytest, ruff, mypy (pure wheels)
+pip install -r requirements-evm.txt                    # + in-process EVM for contract tests (Linux/macOS/WSL; needs a C toolchain on Windows)
 ruff check src tests scripts && ruff format --check src tests scripts && mypy
 (cd web && npm ci && npm run build)
 python scripts/make_readme_assets.py                   # regenerate the SVGs (benchmark from the JSON)
 python scripts/capture_screenshots.py                  # regenerate screenshots + GIF from the live app
 ```
 
-As of 2026-10-30 (Python 3.13.13, Windows 11): **695 tests pass** with the dev extras (in-process EVM, real model weights, web API, C2PA); **665 pass, 1 skipped** in a clean environment from `requirements.txt` alone (the EVM module skips with a reason). Coverage includes every match outcome and boundary, deterministic selection, fail-closed verification, SSRF/redirect/size/decode limits, consent gates and secret redaction, record and bundle tampering, RFC 8785 vectors with a JavaScript cross-check, RFC 6962 reference values, contract behaviour (duplicates, zero values, v1/v2/v3 detection, calldata and events, gas), SCRFD decode and alignment, geometric verification, C2PA (including a real signed sample and a tampered copy) and download concurrency.
+As of 2026-11-03: **713 passed, 1 skipped** on Windows 11 / Python 3.13.13 from `requirements-dev.txt` + `constraints.txt` (the skip is the in-process-EVM contract module, which needs `requirements-evm.txt` and a C toolchain on Windows), including 4 real-browser tests of the verifier page; **732 passed, 8 skipped** on Ubuntu (WSL, Python 3.13) with the EVM module running (skips: Playwright, the git-ignored C2PA sample, `node`); `cd web && npm test` runs 13 verifier tests; ruff, ruff format and mypy are clean. CI fails if the contract tests skip. Coverage includes every match outcome and boundary, deterministic selection, fail-closed verification, SSRF/redirect/size/decode limits, consent gates and secret redaction, record and bundle tampering, RFC 8785 vectors with a JavaScript cross-check, RFC 6962 reference values, contract behaviour (duplicates, zero values, v1/v2/v3 detection, calldata and events, gas), SCRFD decode and alignment, geometric verification, C2PA (including a real signed sample and a tampered copy) and download concurrency.
 
 `.github/workflows/ci.yml` runs lint, format, mypy, tests and contract compilation on Python 3.11–3.13 plus the frontend build, with no secrets and no `continue-on-error`. In previous CI runs, frontend build and Python 3.12/3.13 succeeded while Python 3.11 failed during pip install due to `numpy==2.5.4` requiring Python >= 3.12; `constraints.txt` was subsequently patched to `numpy==2.2.6` to restore full Python 3.11–3.13 matrix compatibility. `ruff format` is enforced for new or rewritten files; older modules are listed as exclusions in `pyproject.toml`.
 
 | Document | What is in it |
 |---|---|
+| [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) | Attack matrix with the control, the test and the residual risk for each row |
+| [docs/PRIVACY.md](docs/PRIVACY.md) | Biometric handling, DPDP summary, deletion, no-identification rule |
+| [docs/DECISIONS.md](docs/DECISIONS.md) | Why OpenTimestamps over a testnet registry, why no AI detector, and the other major choices |
+| [BENCHMARKS.md](BENCHMARKS.md) | Every number quoted anywhere, with the command that reproduces it |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | State and next steps |
+| [docs/INTERVIEW_PACK.md](docs/INTERVIEW_PACK.md) | Pitch, whiteboard architecture, hard questions |
 | [docs/PIPELINE.md](docs/PIPELINE.md) | Design of each stage and the decisions behind it |
 | [docs/EVALUATION.md](docs/EVALUATION.md) | Benchmarks, stress tests, thresholds, and every caveat |
 | [docs/RECORD_FORMAT.md](docs/RECORD_FORMAT.md) | Record schema, algorithm labels, anchor modes, bundles, migration |
@@ -302,6 +358,13 @@ As of 2026-10-30 (Python 3.13.13, Windows 11): **695 tests pass** with the dev e
 | [docs/articles/faceproof-engineering-story.md](docs/articles/faceproof-engineering-story.md) | Publication-quality deep dive technical article |
 
 ## What is not done, and what is not claimed
+
+* **The OpenTimestamps round trip is only half proven on a live network.** On 2026-11-03 one record hash (a synthetic sample image; [docs/examples/live-ots-attestation.json](docs/examples/live-ots-attestation.json)) was accepted by all three public calendars, and `verify` correctly reports it `PENDING` (exit 3). The Bitcoin confirmation, `ots-upgrade` and the final `verified` result were **not yet observed**; run `ots-upgrade` on that file after a few hours. The Bitcoin-header check itself is tested only against a fabricated header.
+* **There is no AI-image detector**, on purpose. "Synthetic-media signals" are declarations read from metadata, labelled as such; their absence proves nothing.
+* **Both container images build and start** (verifier: CSP headers served; API: healthy, runs as a non-root user, `/api/attest` and `/verifier/` answer, a wrong `Host` header is refused). The smoke test found and fixed a missing OpenCV system library. **CI has never run on GitHub.**
+* **The verifier page checks exact bytes only** (no pHash, no face model, no EVM lookups) and trusts public block explorers for Bitcoin headers unless you verify the `.ots` with your own node.
+* **Signing keys are unencrypted at rest**; no rotation or revocation.
+* **The real-photo evaluation covers one kind of photo** (LFW portraits, 250 px) and no stacked edits.
 
 * **Registry v3 is not deployed.** It is compiled and tested on an in-process EVM; a real deployment is a manual, deliberate step. A plaintext URL ever sent to an old v1 contract stays public.
 * **Face matching is measured on LFW only.** No IJB-C / CFP-FP / AgeDB, no demographic breakdown, one machine. Thresholds are indicative, not calibrated for any population.

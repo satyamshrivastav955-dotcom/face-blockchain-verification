@@ -10,8 +10,8 @@ make models                 # optional: real model weights (needed only by tests
 ```
 
 `make help` lists every target. `make check` runs what CI runs for Python: ruff, ruff format, mypy and the
-hermetic test suite (no network, keys, wallet or gas). The contract tests need `eth-tester[py-evm]` and skip,
-with a reason, when it is missing.
+hermetic test suite (no network, keys, wallet or gas). The contract tests need `eth-tester[py-evm]` (`make install-evm`, Linux/macOS/WSL) and skip,
+with a reason, when it is missing; CI fails if they skip.
 
 ## Principles that review will hold you to
 
