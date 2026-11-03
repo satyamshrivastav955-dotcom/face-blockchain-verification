@@ -1,0 +1,9 @@
+# Dev extras + the in-process EVM used by tests/test_registry_evm.py.
+# Install with:  pip install -r requirements-evm.txt -c ci-constraints.txt   (CI) or -c constraints.txt (Linux/macOS)
+#
+# Kept separate because py-evm -> safe-pysha3 has no Windows wheel and needs a C compiler there
+# (verified 2026-11-02: `pip install -r` of the former single dev file failed on Windows / Python 3.13.13).
+# Without this file the contract behaviour tests are SKIPPED, not run; CI fails if they skip.
+-r requirements-dev.txt
+
+eth-tester[py-evm]>=0.12,<1

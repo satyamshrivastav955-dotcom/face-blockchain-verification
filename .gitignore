@@ -45,3 +45,9 @@ input/*
 /models/insightface/
 /models/_dl/
 /eval_data/
+
+# ---- Local scratch / recordings (never commit) ----
+.req-tmp.txt
+*.mp4
+
+/web/dist-verifier/

@@ -1,4 +1,4 @@
-.PHONY: help install install-dev models test lint format typecheck check web assets screenshots demo clean
+.PHONY: help install install-dev install-evm models test lint format typecheck check web assets screenshots demo clean
 
 PY ?= python
 
@@ -8,8 +8,11 @@ help:  ## list targets
 install:  ## runtime dependencies, pinned to the tested versions
 	$(PY) -m pip install -r requirements.txt -c constraints.txt
 
-install-dev:  ## + lint, types, web API and in-process EVM test deps
+install-dev:  ## + lint, types, web API test deps (pure wheels; contract tests will SKIP)
 	$(PY) -m pip install -r requirements-dev.txt -c constraints.txt
+
+install-evm:  ## + in-process EVM for the contract tests (needs a C toolchain on Windows; use Linux/WSL)
+	$(PY) -m pip install -r requirements-evm.txt -c constraints.txt
 
 models:  ## download the permissively licensed OpenCV Zoo models (checksum-verified)
 	$(PY) scripts/fetch_models.py

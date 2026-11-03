@@ -16,3 +16,7 @@ web3>=7.0,<8
 py-solc-x>=2.0.2
 
 # Tests: see requirements-dev.txt. Reproducible installs: constraints.txt
+
+# Record signatures (Ed25519) and OpenTimestamps anchoring
+cryptography>=42
+opentimestamps>=0.4.5,<1
