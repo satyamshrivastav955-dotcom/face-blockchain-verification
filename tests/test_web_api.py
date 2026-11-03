@@ -286,3 +286,86 @@ def test_internal_errors_do_not_leak_details(tmp_path, monkeypatch):
     with TestClient(app, raise_server_exceptions=False) as client:
         r = client.get(f"/api/jobs/{'a' * 32}")
     assert r.status_code == 500 and "secret path" not in r.text
+
+
+class TestAttestEndpoint:
+    def test_attest_returns_a_sealed_record_without_any_face_data(self, strict_client):
+        r = strict_client.post("/api/attest", files={"image": ("p.png", QUERY, "image/png")}, data={"note": "hello"})
+        assert r.status_code == 200
+        body = r.json()
+        record = body["record"]
+        assert record["schema"] == "faceproof/attestation/v1" and record["anchor"] is None
+        assert "face" not in record["payload"] and "p.png" not in json.dumps(record)
+        assert body["summary"]["signed"] is False and body["summary"]["synthetic_declaration"] == "no_declaration"
+        for secret in SECRETS.values():
+            assert secret not in r.text
+
+    def test_the_record_it_returns_verifies_locally(self, strict_client):
+        record = strict_client.post("/api/attest", files={"image": ("p.png", QUERY, "image/png")}).json()["record"]
+        v = strict_client.post(
+            "/api/verify",
+            files={
+                "record": ("r.json", json.dumps(record), "application/json"),
+                "image": ("p.png", QUERY, "image/png"),
+            },
+        ).json()
+        assert v["checks"]["local_integrity"]["status"] == "pass"
+        assert v["checks"]["image_binding"]["status"] == "pass"
+        assert v["verdict"] == "not_anchored"  # no time evidence yet: fails closed
+
+    def test_signing_needs_a_configured_key(self, strict_client):
+        r = strict_client.post("/api/attest", files={"image": ("p.png", QUERY, "image/png")}, data={"sign": "true"})
+        assert r.status_code == 400 and "no signing key" in r.json()["detail"]
+
+    def test_signing_with_a_server_key(self, tmp_path):
+        from src.trust import generate_key
+
+        s = make_settings(tmp_path)
+        generate_key(tmp_path / "k.pem")
+        s.signing_key_file = str(tmp_path / "k.pem")
+        with TestClient(create_app(s, demo=False)) as client:
+            assert client.get("/api/health").json()["signing_configured"] is True
+            record = client.post(
+                "/api/attest", files={"image": ("p.png", QUERY, "image/png")}, data={"sign": "true"}
+            ).json()["record"]
+            assert record["signature"]["algorithm"] == "ed25519"
+            ok = client.post(
+                "/api/verify",
+                files={"record": ("r.json", json.dumps(record), "application/json")},
+                data={"trusted_key": record["signature"]["public_key"]},
+            ).json()
+            assert ok["checks"]["signature"]["status"] == "pass"
+            bad = client.post(
+                "/api/verify",
+                files={"record": ("r.json", json.dumps(record), "application/json")},
+                data={"trusted_key": "11" * 32},
+            ).json()
+            assert bad["checks"]["signature"]["status"] == "fail" and bad["verdict"] == "local_hash_mismatch"
+
+    def test_rejects_non_images_oversized_notes_and_bad_pins(self, strict_client):
+        assert (
+            strict_client.post("/api/attest", files={"image": ("x.png", b"not an image", "image/png")}).status_code
+            == 422
+        )
+        assert (
+            strict_client.post(
+                "/api/attest", files={"image": ("p.png", QUERY, "image/png")}, data={"note": "x" * 501}
+            ).status_code
+            == 422
+        )
+        record = strict_client.post("/api/attest", files={"image": ("p.png", QUERY, "image/png")}).json()["record"]
+        r = strict_client.post(
+            "/api/verify",
+            files={"record": ("r.json", json.dumps(record), "application/json")},
+            data={"trusted_key": "zz"},
+        )
+        assert r.status_code == 422
+
+    def test_require_image_without_an_image_is_inconclusive(self, strict_client):
+        record = strict_client.post("/api/attest", files={"image": ("p.png", QUERY, "image/png")}).json()["record"]
+        v = strict_client.post(
+            "/api/verify",
+            files={"record": ("r.json", json.dumps(record), "application/json")},
+            data={"require_image": "true"},
+        ).json()
+        assert v["verdict"] == "inconclusive" and v["exit_code"] == 6

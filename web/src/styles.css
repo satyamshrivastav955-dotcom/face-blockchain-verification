@@ -341,3 +341,25 @@ tr.chosen td { background: rgba(46, 88, 66, 0.12) !important; }
   .refuse s { background-size: 100% 2.5px; }
   .stamp { opacity: 0.88; } .seal { opacity: 0.82; transform: rotate(-8deg); }
 }
+
+/* ===================== attest / drop fields / ways ===================== */
+.dropfield { position: relative; display: flex; flex-direction: column; gap: 0.25rem; margin: 0.8rem 0; padding: 0.9rem 1rem; border: 1.5px dashed var(--rule-2); background: var(--sheet); cursor: pointer; transition: border-color 0.15s, background 0.15s; border-radius: 2px; }
+.dropfield:hover, .dropfield.over { border-color: var(--navy); background: #fffaf0; }
+.dropfield.has { border-style: solid; border-color: var(--forest); }
+.dropfield:focus-within { outline: 2px solid var(--navy); outline-offset: 3px; }
+.dropfield input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.df-label { font: 600 0.7rem var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
+.df-body { color: var(--muted); font-size: 0.95rem; overflow-wrap: anywhere; }
+.dropfield.has .df-body { color: var(--ink); }
+textarea { font: 0.95rem var(--serif); padding: 0.6rem 0.7rem; border: 1px solid var(--rule-2); background: var(--card); color: var(--ink); border-radius: 2px; resize: vertical; }
+.sub { display: block; font-size: 0.85rem; color: var(--muted); margin-top: 0.15rem; }
+.adv { margin: 0.6rem 0; border-top: 1px solid var(--rule); padding-top: 0.6rem; }
+.adv summary { cursor: pointer; font: 600 0.74rem var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
+.attest-result small { color: var(--muted); }
+.attest-result .cta { display: flex; gap: 0.7rem; flex-wrap: wrap; margin: 1rem 0 0.4rem; }
+.ways { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.2rem; margin-top: 1.4rem; }
+.way { display: flex; flex-direction: column; gap: 0.5rem; height: 100%; padding: 1.3rem 1.3rem 1.1rem; background: var(--card); border: 1px solid var(--ink); box-shadow: 4px 4px 0 rgba(33, 28, 22, 0.12); text-decoration: none; color: inherit; transition: transform 0.15s, box-shadow 0.15s; }
+.way:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 rgba(33, 28, 22, 0.22); }
+.way h3 { font-size: 1.3rem; }
+.way p { color: var(--ink-2); font-size: 0.97rem; flex: 1; }
+@media (max-width: 860px) { .ways { grid-template-columns: 1fr; } }

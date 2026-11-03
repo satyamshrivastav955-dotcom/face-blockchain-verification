@@ -53,6 +53,7 @@ __all__ = ["create_app", "MAX_UPLOAD_BYTES"]
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 _JOB_ID = re.compile(r"^[0-9a-f]{32}$")
 DIST_DIR = PROJECT_ROOT / "web" / "dist"
+VERIFIER_DIST = PROJECT_ROOT / "web" / "dist-verifier"
 DEMO_DIR = PROJECT_ROOT / "tests" / "data"
 
 
@@ -133,6 +134,7 @@ def create_app(
             "models_present": models_ok,
             "search_provider": base.search_provider,
             "search_configured": bool(base.serpapi_key or base.tineye_api_key),
+            "signing_configured": bool(base.signing_key_file),
             "chain": {
                 "name": base.chain_name,
                 "chain_id": base.chain_id,
@@ -262,6 +264,66 @@ def create_app(
             raise HTTPException(404, "no such job")
         return {"status": job.status}
 
+    # -- image-only attestation (no face analysis, no search, no network) ----------
+
+    @app.post("/api/attest")
+    async def attest(
+        image: UploadFile = File(...),
+        note: str = Form(""),
+        sign: bool = Form(False),
+    ) -> dict[str, Any]:
+        """Describe, seal and optionally sign an image locally. Never touches a face or the network."""
+        data = await _read_limited(image, MAX_UPLOAD_BYTES, "image")
+        try:
+            decode_image_safely(data, label="uploaded image")
+        except ImageError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if sign and not base.signing_key_file:
+            raise HTTPException(400, "this server has no signing key (set SIGNING_KEY_FILE; see 'keygen')")
+        if len(note) > 500:
+            raise HTTPException(422, "note is longer than 500 characters")
+
+        def work() -> dict[str, Any]:
+            from ..attest import build_attestation_payload
+            from ..evidence.record import seal
+            from ..trust import load_private_key, sign_record
+
+            with tempfile.TemporaryDirectory(prefix="faceproof-attest-") as tmp:
+                path = Path(tmp) / "image.img"
+                path.write_bytes(data)
+                payload = build_attestation_payload(path, note=note.strip())
+            record = seal(payload)
+            if sign:
+                sign_record(record, load_private_key(base.signing_key_file))
+            return record
+
+        loop = asyncio.get_running_loop()
+        try:
+            record = await asyncio.wait_for(loop.run_in_executor(None, work), timeout=60)
+        except Exception as exc:  # noqa: BLE001
+            if isinstance(exc, HTTPException):
+                raise
+            name = type(exc).__name__
+            if name == "SigningError":
+                raise HTTPException(400, f"signing key problem: {exc}") from exc
+            raise HTTPException(422, f"could not attest this image ({name})") from exc
+        src = record["payload"]["source_image"]
+        return {
+            "record": record,
+            "summary": {
+                "sha256": src["sha256"],
+                "phash": src["phash"],
+                "width": src["width"],
+                "height": src["height"],
+                "bytes": src["bytes"],
+                "content_credentials": src["content_credentials"]["state"],
+                "synthetic_declaration": record["payload"]["synthetic_media_signals"]["verdict"],
+                "verification_hash": record["integrity"]["verification_hash"],
+                "signed": "signature" in record,
+                "key_id": record.get("signature", {}).get("key_id", ""),
+            },
+        }
+
     # -- verification --------------------------------------------------------
 
     @app.post("/api/verify")
@@ -270,9 +332,14 @@ def create_app(
         image: UploadFile | None = File(None),
         simulated: bool = Form(False),
         job_id: str = Form(""),
+        trusted_key: str = Form(""),
+        require_image: bool = Form(False),
     ) -> dict[str, Any]:
         record_bytes = await _read_limited(record, MAX_RECORD_BYTES, "record")
         image_bytes = await _read_limited(image, MAX_UPLOAD_BYTES, "image") if image and image.filename else None
+        pins = [trusted_key.strip()] if trusted_key.strip() else []
+        if any(len(k) != 64 or any(c not in "0123456789abcdefABCDEF" for c in k) for k in pins):
+            raise HTTPException(422, "the trusted key must be 64 hex characters")
         settings = base
         if job_id:
             settings = manager.settings_for(_job(job_id))
@@ -300,6 +367,8 @@ def create_app(
                     image_path=img_path,
                     console=Capture(force_ascii=True),
                     report=report,
+                    trusted_keys=pins or None,
+                    require_image=require_image,
                 )
             return code, report, lines
 
@@ -325,6 +394,10 @@ def create_app(
         return FileResponse(DEMO_DIR / "query.png", media_type="image/png")
 
     # -- static frontend (if built) -------------------------------------------
+
+    if VERIFIER_DIST.is_dir():
+        # The same static, client-side verifier that can be hosted on its own. Must be mounted before "/".
+        app.mount("/verifier", StaticFiles(directory=VERIFIER_DIST, html=True), name="verifier")
 
     if DIST_DIR.is_dir():
         app.mount("/", StaticFiles(directory=DIST_DIR, html=True), name="ui")

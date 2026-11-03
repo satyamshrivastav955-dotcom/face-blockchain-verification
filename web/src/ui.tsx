@@ -72,6 +72,42 @@ export function Leader({ k, v }: { k: string; v: ReactNode }) {
   );
 }
 
+/** A labelled, keyboard-accessible drop target for one file. The input stays the real control. */
+export function DropField({ label, hint, accept, file, onFile }: { label: string; hint: string; accept: string; file: File | null; onFile: (f: File | null) => void }) {
+  const [over, setOver] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  function take(f: File | undefined) {
+    onFile(f ?? null);
+  }
+  return (
+    <label
+      className={`dropfield${over ? " over" : ""}${file ? " has" : ""}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const f = e.dataTransfer.files?.[0];
+        if (f) {
+          take(f);
+          if (input.current) {
+            const dt = new DataTransfer();
+            dt.items.add(f);
+            input.current.files = dt.files;
+          }
+        }
+      }}
+    >
+      <span className="df-label">{label}</span>
+      <span className="df-body">{file ? `${file.name} · ${file.size.toLocaleString()} bytes` : `Drop a file here, or choose one (${hint})`}</span>
+      <input ref={input} type="file" accept={accept} onChange={(e) => take(e.target.files?.[0])} />
+    </label>
+  );
+}
+
 /** Hidden SVG filter that roughens stamp edges like uneven ink. */
 export function InkFilters() {
   return (

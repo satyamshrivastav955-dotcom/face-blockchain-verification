@@ -1,23 +1,25 @@
 import { useEffect, useState } from "react";
 import { api, type Health } from "./api";
+import { AttestPanel } from "./AttestPanel";
 import { Landing } from "./Landing";
 import { RegisterPanel } from "./RegisterPanel";
 import { SystemPanel } from "./SystemPanel";
 import { InkFilters } from "./ui";
 import { VerifyPanel } from "./VerifyPanel";
 
-type Route = "home" | "verify" | "record" | "system";
+type Route = "home" | "attest" | "verify" | "record" | "system";
 
 const TABS: { route: Route; label: string; hash: string; no: string }[] = [
   { route: "home", label: "Overview", hash: "#/", no: "I" },
-  { route: "verify", label: "Open a case", hash: "#/verify", no: "II" },
+  { route: "attest", label: "Attest an image", hash: "#/attest", no: "II" },
   { route: "record", label: "Examine a record", hash: "#/record", no: "III" },
-  { route: "system", label: "Bureau status", hash: "#/system", no: "IV" },
+  { route: "verify", label: "Trace an image", hash: "#/verify", no: "IV" },
+  { route: "system", label: "Bureau status", hash: "#/system", no: "V" },
 ];
 
 function routeFromHash(): Route {
   const h = window.location.hash.replace(/^#\/?/, "");
-  return (["verify", "record", "system"] as Route[]).includes(h as Route) ? (h as Route) : "home";
+  return (["attest", "verify", "record", "system"] as Route[]).includes(h as Route) ? (h as Route) : "home";
 }
 
 export default function App() {
@@ -86,6 +88,7 @@ export default function App() {
           </div>
         )}
         {route === "home" && <Landing health={health} />}
+        {route === "attest" && (health ? <AttestPanel health={health} /> : wait)}
         {route === "verify" && (health ? <RegisterPanel health={health} /> : wait)}
         {route === "record" && (health ? <VerifyPanel health={health} /> : wait)}
         {route === "system" && (health ? <SystemPanel health={health} /> : wait)}

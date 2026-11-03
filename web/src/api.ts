@@ -8,6 +8,7 @@ export interface Health {
   models_present: boolean;
   search_provider: string;
   search_configured: boolean;
+  signing_configured: boolean;
   chain: { name: string; chain_id: number; contract_configured: boolean; signer_configured: boolean };
   thresholds: { face_cosine: number; phash_max_distance: number };
   limits: { upload_bytes: number; record_bytes: number };
@@ -101,9 +102,29 @@ export interface VerifyReport {
   evidence_type?: string;
   record_hash?: string;
   checks: Record<string, { status: CheckState; detail: string }>;
+  anchor_mode?: string;
+  bound_to_image?: boolean;
+  signature?: { state: string; pinned: boolean | null; key_id: string };
+  ots?: { state: string; block_height: number | null; block_time: number | null; detail: string };
   chain?: { network?: string; chain_id?: number; contract_address?: string; block_number?: number; block_timestamp?: number; tx_hash?: string; explorer_url?: string; submitter?: string };
   warnings?: string[];
   log: string[];
+}
+
+export interface AttestResult {
+  record: Record<string, unknown>;
+  summary: {
+    sha256: string;
+    phash: string;
+    width: number;
+    height: number;
+    bytes: number;
+    content_credentials: string;
+    synthetic_declaration: string;
+    verification_hash: string;
+    signed: boolean;
+    key_id: string;
+  };
 }
 
 export class ApiError extends Error {
@@ -133,6 +154,7 @@ export const api = {
   createJob: (form: FormData) => fetch("/api/jobs", { method: "POST", body: form }).then(parse<{ id: string; status: JobState }>),
   job: (id: string) => fetch(`/api/jobs/${id}`).then(parse<JobStatus>),
   deleteJob: (id: string) => fetch(`/api/jobs/${id}`, { method: "DELETE" }).then(parse<{ status: JobState }>),
+  attest: (form: FormData) => fetch("/api/attest", { method: "POST", body: form }).then(parse<AttestResult>),
   verify: (form: FormData) => fetch("/api/verify", { method: "POST", body: form }).then(parse<VerifyReport>),
   fileUrl: (id: string, name: string) => `/api/jobs/${id}/files/${name}`,
   demoSample: () => fetch("/api/demo/sample.png").then((r) => (r.ok ? r.blob() : Promise.reject(new ApiError(r.status, "demo sample unavailable")))),

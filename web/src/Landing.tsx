@@ -22,6 +22,12 @@ const ATTESTED = [
   "The on-chain URL commitment matches the record.",
 ];
 
+const WAYS = [
+  { n: "I", t: "Attest an image", href: "#/attest", d: "Seal a signed description of one file. No face analysis, no search, no network. This is the core of FaceProof.", tag: "LOCAL" },
+  { n: "II", t: "Examine a record", href: "#/record", d: "Check any record: hash, signature, the exact image, and its Bitcoin timestamp or ledger entry. Or use the server-free verifier page.", tag: "LOCAL" },
+  { n: "III", t: "Trace an image", href: "#/verify", d: "Optional and consent-gated: find where an image appeared and re-check each lead on your machine. This is the only part that analyses a face.", tag: "WITH CONSENT" },
+];
+
 export function Landing({ health }: { health: Health | null }) {
   return (
     <div className="landing">
@@ -30,14 +36,15 @@ export function Landing({ health }: { health: Health | null }) {
         <div className="hero-copy">
           <p className="folio">File no. FP-001 · Image provenance</p>
           <h1>
-            The receipts for <em>where</em> an image appeared.
+            A record of an image that <em>anyone</em> can check.
           </h1>
           <p className="lede">
-            FaceProof re-examines every search lead on your own machine, says plainly whether the evidence is a <b>face match</b> or only an{" "}
-            <b>image-similarity</b> match, and anchors a tamper-evident hash of the result. It publishes no face, no embedding and no URL.
+            FaceProof writes a sealed, signed, time-stamped description of a file that <b>anyone can check without trusting you</b>, and never claims to
+            know who is in a picture. Optionally it traces where an image appeared, and says plainly whether a hit is a <b>face match</b> or only an{" "}
+            <b>image-similarity</b> match.
           </p>
           <div className="cta">
-            <a className="btn solid" href="#/verify">Open a case</a>
+            <a className="btn solid" href="#/attest">Attest an image</a>
             <a className="btn" href="#/record">Examine a record</a>
           </div>
           <p className="fine">Not an identity tool. It cannot tell you who anyone is, and it will say so on every page.</p>
@@ -48,17 +55,18 @@ export function Landing({ health }: { health: Health | null }) {
           <div className="sheet-back s1" aria-hidden="true" />
           <article className="sheet-front">
             <header>
-              <span>RECORD · faceverify/v2</span>
+              <span>RECORD · faceproof/attestation/v1</span>
               <span>Anatomy</span>
             </header>
-            <Leader k="evidence_type" v="face_match | image_derivative" />
-            <Leader k="decision_rule" v="named, never implied" />
-            <Leader k="scores" v="cosine · pHash, as strings" />
-            <Leader k="claim" v="worded per evidence type" />
+            <Leader k="source_image" v="sha256 · pHash · size" />
+            <Leader k="content_credentials" v="C2PA state, read-only" />
+            <Leader k="synthetic_media" v="declared in metadata, not detected" />
+            <Leader k="claim" v="one narrow sentence" />
             <Leader k="limitations" v="listed in the record" />
-            <Leader k="embedding" v="commitment only, never the vector" />
+            <Leader k="face data" v="none: never detected" />
             <Leader k="integrity" v="sha256 · restricted JCS" />
-            <Leader k="anchor" v="hash + keccak256(url)" />
+            <Leader k="signature" v="Ed25519 over the hash" />
+            <Leader k="anchor" v="Bitcoin via OpenTimestamps" />
             <p className="legend">Illustrative layout: field names and allowed values only. A real record holds your run&apos;s data.</p>
             <div className="seal-wrap"><Seal /></div>
             <div className="stamp-pos"><Stamp tone="ok" big tilt={-9} delay={500}>Sealed</Stamp></div>
@@ -77,11 +85,31 @@ export function Landing({ health }: { health: Health | null }) {
         </section>
       </Reveal>
 
+      {/* ------------------------------------------------ three ways */}
+      <section className="part" aria-labelledby="ways-h">
+        <Reveal>
+          <p className="folio">Start here</p>
+          <h2 id="ways-h">Three things you can do</h2>
+        </Reveal>
+        <div className="ways">
+          {WAYS.map((w, i) => (
+            <Reveal key={w.n} delay={i * 70}>
+              <a className="way" href={w.href}>
+                <span className="proc-n">{w.n}</span>
+                <h3>{w.t}</h3>
+                <p>{w.d}</p>
+                <span className={`where ${w.tag === "LOCAL" ? "local" : "ext"}`}>{w.tag}</span>
+              </a>
+            </Reveal>
+          ))}
+        </div>
+      </section>
+
       {/* ------------------------------------------------ procedure */}
       <section className="part" aria-labelledby="proc-h">
         <Reveal>
           <p className="folio">Part I</p>
-          <h2 id="proc-h">Procedure</h2>
+          <h2 id="proc-h">Procedure for tracing an image</h2>
           <p className="part-lede">Five steps, each marked with where it runs. Two of them can send data to others; both ask first.</p>
         </Reveal>
         <ol className="procedure">
@@ -193,11 +221,11 @@ export function Landing({ health }: { health: Health | null }) {
       <Reveal>
         <section className="closing">
           <div>
-            <h2>Open a case, or rehearse offline.</h2>
-            <p>Run the whole procedure on a synthetic fixture with no network, no key and no gas. Every simulated step is labelled as simulated.</p>
+            <h2>Attest a file, or rehearse the trace offline.</h2>
+            <p>Attesting needs no key, no network and no gas. The trace can run on a synthetic fixture with every simulated step labelled as simulated.</p>
           </div>
           <div className="cta">
-            <a className="btn solid inv" href="#/verify">Open a case</a>
+            <a className="btn solid inv" href="#/attest">Attest an image</a>
             <a className="btn inv" href="#/system">Bureau status</a>
           </div>
         </section>

@@ -1,21 +1,22 @@
 import { useEffect, useState } from "react";
 import { api, ApiError, type CheckState, type Health, type VerifyReport } from "./api";
-import { Stamp, reducedMotion } from "./ui";
+import { DropField, Stamp, reducedMotion } from "./ui";
 
 const VERDICT: Record<string, { text: string; stamp: string; tone: "ok" | "err" | "warn" | "mute" }> = {
   verified: { text: "Unmodified, anchored, and the URL commitment matches.", stamp: "Verified", tone: "ok" },
   local_hash_mismatch: { text: "Failed local checks: modified, wrong image, or unverifiable.", stamp: "Failed", tone: "err" },
-  not_anchored: { text: "The hash is not registered on the ledger.", stamp: "Not anchored", tone: "err" },
+  not_anchored: { text: "No confirmed time evidence: the hash is not registered, or its timestamp is still pending.", stamp: "Not anchored", tone: "err" },
   anchor_mismatch: { text: "Anchored, but the record conflicts with the on-chain commitment.", stamp: "Conflict", tone: "err" },
   inconclusive: { text: "A required check could not be completed. Nothing is claimed either way.", stamp: "Inconclusive", tone: "warn" },
 };
 
 const CHECKS: Record<string, string> = {
   local_integrity: "Local integrity — hash recomputed from the payload",
+  signature: "Signature — who signed this record (a key, not a name)",
   image_binding: "Image binding — record describes this file",
   evidence_bundle: "Evidence bundle — manifest and cross-links",
   merkle_inclusion: "Batch inclusion — Merkle proof from the record to the anchored root",
-  chain_anchor: "Ledger anchor — hash (or batch root) is registered",
+  chain_anchor: "Time evidence — hash (or batch root) is on a ledger, or timestamped on Bitcoin",
   url_commitment: "URL commitment — keccak256 of the URL equals the on-chain value",
 };
 
@@ -34,7 +35,11 @@ export function VerifyResult({ report }: { report: VerifyReport }) {
     return () => [...ids, last].forEach(window.clearTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report]);
-  const v = VERDICT[report.verdict] ?? { text: report.verdict, stamp: report.verdict, tone: "mute" as const };
+  const base = VERDICT[report.verdict] ?? { text: report.verdict, stamp: report.verdict, tone: "mute" as const };
+  const v =
+    report.verdict === "verified" && report.anchor_mode === "opentimestamps"
+      ? { ...base, text: "Unmodified, and its hash existed by a Bitcoin block (OpenTimestamps)." }
+      : base;
 
   return (
     <div className="examination" aria-live="polite">
@@ -56,6 +61,18 @@ export function VerifyResult({ report }: { report: VerifyReport }) {
           <p className="folio">Verdict · exit code {report.exit_code}</p>
           <p className="verdict-text">{v.text}</p>
           {report.message && <p className="muted">{report.message}</p>}
+          {report.verdict === "verified" && report.bound_to_image === false && (
+            <p className="notice warn"><b>Not bound to an image.</b> This shows the record is unchanged, not that it describes a file you hold. Add the image and examine again.</p>
+          )}
+          {report.signature?.state === "valid" && report.signature.pinned === null && (
+            <p className="notice warn"><b>Signer not pinned.</b> A key signed this record (id {report.signature.key_id}); nothing shows whose key it is. Enter the author&apos;s public key to require it.</p>
+          )}
+          {report.ots?.block_height != null && (
+            <dl className="facts">
+              <dt>Bitcoin block</dt><dd>{report.ots.block_height}</dd>
+              {report.ots.block_time != null && (<><dt>Block time</dt><dd>{new Date(report.ots.block_time * 1000).toISOString()}</dd></>)}
+            </dl>
+          )}
           {report.simulated && <p className="notice warn"><b>Simulated.</b> Checked against a local JSON file, not a blockchain.</p>}
           {report.test_only && <p className="notice warn"><b>Test-only record</b> (stub engine / offline fixture).</p>}
           {report.chain && !report.simulated && report.chain.block_number !== undefined && (
@@ -82,6 +99,8 @@ export function VerifyPanel({ health }: { health: Health }) {
   const [record, setRecord] = useState<File | null>(null);
   const [image, setImage] = useState<File | null>(null);
   const [simulated, setSimulated] = useState(false);
+  const [pin, setPin] = useState("");
+  const [requireImage, setRequireImage] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [report, setReport] = useState<VerifyReport | null>(null);
@@ -96,6 +115,8 @@ export function VerifyPanel({ health }: { health: Health }) {
     form.set("record", record);
     if (image) form.set("image", image);
     form.set("simulated", String(simulated));
+    form.set("require_image", String(requireImage));
+    if (pin.trim()) form.set("trusted_key", pin.trim());
     try {
       setReport(await api.verify(form));
     } catch (e) {
@@ -111,21 +132,27 @@ export function VerifyPanel({ health }: { health: Health }) {
         <p className="folio">Examination</p>
         <h1 className="h1">Examine a record</h1>
         <p className="lede">
-          The record&apos;s hash is recomputed, optionally bound to the original image, then looked up on the ledger. A check that cannot run is never
-          reported as a pass.
+          The record&apos;s hash is recomputed, its signature checked, optionally bound to the original image, then its time evidence (a Bitcoin timestamp or a
+          ledger entry) is looked up. A check that cannot run is never reported as a pass. You can also check records without any server at{" "}
+          <a href="/verifier/" target="_blank" rel="noreferrer noopener">the standalone verifier</a>.
         </p>
       </header>
       <div className="exam-grid">
         <form className="plate" onSubmit={submit}>
           <h2><span className="tag-ex">Intake</span> Record and image</h2>
-          <label className="field">
-            <span>Verification record (JSON, up to {Math.round(health.limits.record_bytes / 1048576)} MiB)</span>
-            <input type="file" accept="application/json,.json" onChange={(e) => setRecord(e.target.files?.[0] ?? null)} />
+          <DropField label="Record" hint={`JSON, up to ${Math.round(health.limits.record_bytes / 1048576)} MiB`} accept="application/json,.json" file={record} onFile={setRecord} />
+          <DropField label="Image (recommended)" hint="the exact file the record describes" accept="image/*" file={image} onFile={setImage} />
+          <label className="check">
+            <input type="checkbox" checked={requireImage} onChange={(e) => setRequireImage(e.target.checked)} />
+            <span>Require the image <small className="sub">Without it a pass would only mean the record is unchanged.</small></span>
           </label>
-          <label className="field">
-            <span>Optional: the original image — checks the record describes exactly this file</span>
-            <input type="file" accept="image/*" onChange={(e) => setImage(e.target.files?.[0] ?? null)} />
-          </label>
+          <details className="adv">
+            <summary>Require a specific signer</summary>
+            <label className="field">
+              <span>Trusted Ed25519 public key (64 hex characters)</span>
+              <input type="text" value={pin} onChange={(e) => setPin(e.target.value)} spellCheck={false} autoComplete="off" placeholder="from the record author, out of band" />
+            </label>
+          </details>
           <label className="check">
             <input type="checkbox" checked={simulated} onChange={(e) => setSimulated(e.target.checked)} />
             <span>Check against the simulated local ledger instead of the real chain</span>
